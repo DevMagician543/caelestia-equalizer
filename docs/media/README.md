@@ -1,15 +1,11 @@
 # Preview media
 
-- [Bass Boost](bass-boost.png): the Bass Boost preset during the music comparison.
-- [Vocal](vocal.png): the Vocal preset during the music comparison.
-- [Bypassed](bypassed.png): Original, with the equalizer bypassed.
-- [Animated preview](demo.gif): a silent, looping visual preview.
-- [Music comparison](demo.mp4): H.264 MP4 at 30 fps with stereo AAC audio.
+- [Desktop demo with music](demo.mp4): the supplied desktop recording, optimized for web playback at 1920 × 1080, 60 fps, with stereo AAC audio.
+- [Animated preview](demo.gif): a silent, looping GIF made from the same recording.
+- [Bass Boost](bass-boost.png), [Vocal](vocal.png), and [Bypassed](bypassed.png): close-up screenshots from the earlier presentation frame.
 
-Turn on sound in the MP4 to compare **Original → Bass Boost → Original → Deep Bass → Original → Vocal → Original → Bass Boost**. The music continues through the switches; the same passage is not replayed for each preset.
+The video runs for approximately 32 seconds and shows the real Caelestia dashboard on the desktop, with the recorded music, visualizer, and preset changes. The complete video frame and duration are retained. A single −2 dB gain adjustment provides audio export headroom; individual sections are not separately normalized.
 
-Captured from the real QML component connected to EasyEffects, framed on a clean background. Audio comes directly from EasyEffects’ processed output through a temporary PipeWire capture connection. The microphone and Discord voice output are not captured. One constant gain adjustment is applied to the full recording for export headroom; individual presets are not separately normalized. The original equalizer settings are restored after recording.
+The original user-supplied recording remains unchanged. The repository contains an optimized H.264/AAC copy and the derived GIF.
 
-Music in this recording: **“Jane!” by The Long Faces**, played from the existing music session. The project license covers the code; music rights remain with their respective owners.
-
-The surrounding presentation frame is for the previews. Band-gain curves are illustrative, not measured frequency responses. No browser, messaging, or unrelated desktop content is included.
+Music: **“Jane!” by The Long Faces**. The project license covers the code; music rights remain with their respective owners. Band-gain curves are illustrative, not measured frequency responses.

@@ -2,9 +2,9 @@
 
 ## 1.0.1
 
-- Add a labeled music comparison showing Original, Bass Boost, Deep Bass, and Vocal.
-- Refresh the screenshots and silent GIF preview to match the audio demo.
-- Document how the processed output is captured and how to hear the comparison.
+- Add a desktop video preview with music and equalizer preset changes.
+- Use the supplied recording for the MP4 and silent GIF previews.
+- Include close-up screenshots and document the preview media.
 
 ## 1.0.0
 
