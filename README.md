@@ -172,7 +172,7 @@ bash -n install.sh
 qmllint assets/EqualizerTab.qml  # With Caelestia/Qt QML tooling installed
 ```
 
-Tests cover dashboard patching, idempotency, removal, fresh audio configuration, preservation of existing settings, atomic writes, and installation in an isolated temporary home. An optional [GitHub Actions workflow](docs/ci/checks.yml) runs the Python and Bash checks without touching a real audio session. To enable it, copy the template to `.github/workflows/checks.yml` using an account or token with permission to manage workflows.
+Tests cover dashboard patching, idempotency, removal, fresh audio configuration, preservation of existing settings, atomic writes, and installation in an isolated temporary home. The [GitHub Actions workflow](.github/workflows/checks.yml) runs the Python and Bash checks on pushes and pull requests without touching a real audio session.
 
 ```text
 assets/EqualizerTab.qml       Dashboard UI
