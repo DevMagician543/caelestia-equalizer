@@ -1,0 +1,18 @@
+Caelestia Equalizer
+Copyright (C) 2026 DevMagician543 and contributors.
+SPDX-License-Identifier: GPL-3.0-only
+
+This project integrates with Caelestia and uses the installed shell's QML
+components and design tokens. Caelestia is developed by the caelestia-dots
+contributors and distributed under GPL-3.0:
+https://github.com/caelestia-dots/shell
+
+The test fixture tests/fixtures/Content.qml comes from Caelestia's dashboard
+and is included under its GPL-3.0 license. Retrieved from the upstream main
+branch on 2026-11-07. No complete Caelestia installation is bundled here.
+
+EasyEffects and LSP Plugins are separate projects installed through the
+user's distribution package manager. Their trademarks and code belong to
+their respective authors. They are not redistributed in this repository.
+
+Preview media shows the actual add-on running in a presentation frame.
