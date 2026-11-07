@@ -30,9 +30,9 @@ Change the sound of your music, games, and podcasts without leaving the top dash
 
 ![Animated demonstration of presets, individual adjustments, and bypass](docs/media/demo.gif)
 
-**[Watch or download the full MP4 demo](docs/media/demo.mp4)** · [Browse all previews](docs/media)
+**Sound on: [watch or download the music comparison (MP4)](docs/media/demo.mp4)** · [Browse all previews](docs/media)
 
-The captures show the actual QML component connected to EasyEffects, presented in a clean preview frame. The video is silent and demonstrates preset transitions, band adjustments, and bypass. The drawn curve visualizes band gains; it is not a measured acoustic response or the exact combined filter response.
+The captures show the actual QML component connected to EasyEffects, presented in a clean preview frame. The video includes the music playing through EasyEffects, with labeled comparisons between Original (equalizer bypassed), Bass Boost, Deep Bass, and Vocal. It returns to Original between presets so you can hear the changes. The GIF is a silent visual preview. The drawn curve visualizes band gains; it is not a measured acoustic response or the exact combined filter response.
 
 <details>
 <summary>More screenshots: Vocal and bypass</summary>

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+- Add a labeled music comparison showing Original, Bass Boost, Deep Bass, and Vocal.
+- Refresh the screenshots and silent GIF preview to match the audio demo.
+- Document how the processed output is captured and how to hear the comparison.
+
 ## 1.0.0
 
 - Add the Caelestia dashboard equalizer with animated band controls and a gain curve.
