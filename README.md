@@ -147,6 +147,12 @@ systemctl --user disable easyeffects.service
 
 For XDG autostart installations, remove `~/.config/autostart/com.github.wwmm.easyeffects.desktop` instead. These are optional; uninstalling the tab does not remove them.
 
+## Performance reports
+
+Version 1.0.2 sends only edited bands and avoids a redundant full read before each adjustment. A ten-band single-slider edit uses 29 socket requests instead of 88 in the regression test. This is a control-traffic improvement, not an FPS measurement or a confirmed fix for idle lag.
+
+If the dashboard or visualizer becomes slow, report whether it happens only while adjusting the equalizer, with the tab open but idle, or with the dashboard closed. Include your CPU/GPU, EasyEffects and Caelestia versions, band count, and whether EasyEffects was already running before installation. This helps distinguish UI work from the audio processing that the installer starts.
+
 ## Troubleshooting
 
 | Message or symptom | What to do |

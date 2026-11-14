@@ -54,6 +54,7 @@ Item {
     // Keep delegates alive while synchronizing, so dragging and focus survive replies.
     ListModel { id: bandModel }
     property var pending: []
+    property var dirtyBands: ({})
     property int revision: 0
     property int requestRevision: 0
     property int dragging: 0
@@ -71,12 +72,27 @@ Item {
     }
 
     function run(args) {
-        if (busy) {
-            // Replace superseded writes, while preserving enable/disable actions.
+        // Coalesce edits by band, while preserving edits to different bands.
+        if (args[0] === "gains") {
+            const previous = pending.find(item => item[0] === "gains");
+            const changes = Object.assign({}, previous ? JSON.parse(previous[1]) : {}, JSON.parse(args[1]));
+            pending = pending.filter(item => item[0] !== "gains");
+            pending = [...pending, ["gains", JSON.stringify(changes)]];
+        } else if (args[0] === "preset") {
+            // A new preset supersedes all earlier band edits and presets.
+            pending = pending.filter(item => item[0] !== "gains" && item[0] !== "preset");
+            pending = [...pending, args];
+        } else {
             pending = pending.filter(item => item[0] !== args[0]);
             pending = [...pending, args];
-            return;
         }
+        dispatchNext();
+    }
+
+    function dispatchNext() {
+        if (busy || !pending.length) return;
+        const args = pending[0];
+        pending = pending.slice(1);
         busy = true;
         received = false;
         requestRevision = revision;
@@ -86,22 +102,30 @@ Item {
 
     function refresh() { if (!busy && !dragging && !saveTimer.running) run(["snapshot"]); }
     function preview(index, gain) {
+        const rounded = Math.round(gain * 10) / 10;
+        if (Math.abs(bandModel.get(index).gain - rounded) < 0.05) return;
         revision++;
-        bandModel.setProperty(index, "gain", Math.round(gain * 10) / 10);
+        bandModel.setProperty(index, "gain", rounded);
+        dirtyBands = Object.assign({}, dirtyBands, {[index]: rounded});
         localBands();
         saveTimer.restart();
     }
     function save() {
         saveTimer.stop();
-        if (ready) run(["preset", JSON.stringify(bands.map(b => b.gain))]);
+        if (!ready || !Object.keys(dirtyBands).length) return;
+        const changes = dirtyBands;
+        dirtyBands = ({});
+        run(["gains", JSON.stringify(changes)]);
     }
     function selectPreset(index) {
         if (!ready) return;
+        saveTimer.stop();
+        dirtyBands = ({});
         revision++;
         const values = gainsFor(index);
         for (let i = 0; i < values.length; i++) bandModel.setProperty(i, "gain", values[i]);
         localBands();
-        save();
+        run(["preset", JSON.stringify(values)]);
     }
 
     Component.onCompleted: refresh()
@@ -122,7 +146,7 @@ Item {
                     const result = JSON.parse(text);
                     root.ready = result.ready === true;
                     root.status = result.status || qsTr("No response from EasyEffects");
-                    if (root.ready && root.revision === root.requestRevision && !root.dragging) {
+                    if (root.ready && root.revision === root.requestRevision && !root.dragging && !root.pending.length && !Object.keys(root.dirtyBands).length) {
                         if (bandModel.count !== result.bands.length) {
                             bandModel.clear();
                             for (const band of result.bands) bandModel.append(band);
@@ -145,11 +169,14 @@ Item {
                 root.ready = false;
                 root.status = qsTr("EasyEffects helper failed. Try reconnecting.");
             }
-            if (root.pending.length) {
-                const next = root.pending[0];
-                root.pending = root.pending.slice(1);
-                if (root.ready) Qt.callLater(() => root.run(next));
-                else root.pending = [];
+            if (!root.ready) {
+                root.pending = [];
+                root.dirtyBands = ({});
+                saveTimer.stop();
+            } else {
+                // Keep the queue intact until dispatch, including edits arriving
+                // between this exit signal and the next event-loop iteration.
+                Qt.callLater(root.dispatchNext);
             }
         }
     }

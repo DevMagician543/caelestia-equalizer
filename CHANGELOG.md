@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2
+
+- Send only edited bands during slider adjustments instead of writing a full preset.
+- Avoid reading every band before an edit; retain stereo write verification and a complete readback afterward.
+- Merge queued edits by band and prevent older replies from overwriting newer edits.
+- Preserve the ordering of rapid edits and preset changes.
+
+This reduces control-socket traffic during adjustments. It is not a confirmed fix for reports of dashboard or visualizer lag while idle.
+
 ## 1.0.1
 
 - Add a desktop video preview with music and equalizer preset changes.

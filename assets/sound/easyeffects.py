@@ -74,7 +74,7 @@ def set_prop(name, value, channel=None):
         raise ValueError(f"EasyEffects did not apply {name}: {result}")
 
 
-def snapshot():
+def snapshot(include_bands=True):
     if not shutil.which("easyeffects"):
         return {"status": "EasyEffects is not installed", "ready": False}
     if not os.path.exists(SOCKET):
@@ -86,6 +86,8 @@ def snapshot():
         missing_plugin = plugin_status()
         if missing_plugin:
             return {"ready": False, "status": missing_plugin}
+        if not include_bands:
+            return {"ready": True, "numBands": count}
         bands = []
         for i in range(count):
             bands.append({"frequency": float(prop(f"band{i}Frequency", "left")),
@@ -109,20 +111,35 @@ def main():
     if action == "snapshot":
         print(json.dumps(snapshot()))
         return
-    before = snapshot()
+    # Validate availability without reading every band before each edit.
+    before = snapshot(include_bands=False)
     if not before["ready"]:
         print(json.dumps(before))
         return
     try:
         if action == "gain":
             index, gain = int(sys.argv[2]), float(sys.argv[3])
-            if index < 0 or index >= len(before["bands"]) or not -12 <= gain <= 12:
+            if index < 0 or index >= before["numBands"] or not -12 <= gain <= 12:
                 raise ValueError("Band or gain out of range")
             for channel in ("left", "right"):
                 set_prop(f"band{index}Gain", gain, channel)
+        elif action == "gains":
+            changes = json.loads(sys.argv[2])
+            if not isinstance(changes, dict) or not changes:
+                raise ValueError("Invalid band changes")
+            # Validate the complete batch before writing any setting.
+            for key, gain in changes.items():
+                index = int(key)
+                if (str(index) != key or index < 0 or index >= before["numBands"] or
+                        isinstance(gain, bool) or not isinstance(gain, (int, float)) or
+                        not -12 <= gain <= 12 or not math.isfinite(gain)):
+                    raise ValueError("Band or gain out of range")
+            for key, gain in changes.items():
+                for channel in ("left", "right"):
+                    set_prop(f"band{int(key)}Gain", gain, channel)
         elif action == "preset":
             values = json.loads(sys.argv[2])
-            if len(values) != len(before["bands"]) or any(not isinstance(v, (float, int)) or not -12 <= v <= 12 for v in values):
+            if len(values) != before["numBands"] or any(not isinstance(v, (float, int)) or not -12 <= v <= 12 for v in values):
                 raise ValueError("Invalid preset values")
             for index, gain in enumerate(values):
                 for channel in ("left", "right"):
