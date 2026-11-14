@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.3
+
+- Retain the dashboard content while Equalizer is selected, avoiding repeated control construction during the drawer’s opening animation.
+- Build the Equalizer controls asynchronously on first use.
+- Pause polling while hidden and refresh settings when the retained page becomes visible again.
+- Populate the band model in one batch.
+- Back up and restore the targeted dashboard-wrapper change during install and uninstall.
+
 ## 1.0.2
 
 - Send only edited bands during slider adjustments instead of writing a full preset.

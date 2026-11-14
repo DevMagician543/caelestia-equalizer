@@ -10,6 +10,7 @@ spec = importlib.util.spec_from_file_location('installer', ROOT / 'install.py')
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 FIXTURE = (ROOT / 'tests/fixtures/Content.qml').read_text()
+WRAPPER_FIXTURE = (ROOT / 'tests/fixtures/Wrapper.qml').read_text()
 
 
 class NavigationTests(unittest.TestCase):
@@ -33,6 +34,29 @@ class NavigationTests(unittest.TestCase):
         updated = installer.patch_navigation(FIXTURE).replace('EqualizerTab {}', 'EqualizerTab { custom: true }')
         with self.assertRaises(RuntimeError):
             installer.remove_navigation(updated)
+
+
+class WrapperTests(unittest.TestCase):
+    def test_only_selected_equalizer_gets_retained(self):
+        updated = installer.patch_wrapper(WRAPPER_FIXTURE)
+        self.assertIn(installer.WRAPPER_CACHED, updated)
+        self.assertIn('tabs[root.screenState.dashboardTab]?.iconName === "equalizer"', updated)
+        self.assertIn('onLoaded: Qt.callLater(root.updateEqualizerPageRetention)', updated)
+        self.assertNotIn('active: root.shouldBeActive || root.visible || ((content.item', updated)
+        self.assertEqual(installer.patch_wrapper(updated), updated)
+
+    def test_uninstall_preserves_other_wrapper_customizations(self):
+        customized = WRAPPER_FIXTURE.replace('id: root', 'id: root\n    property string customSetting: "keep"')
+        self.assertEqual(installer.remove_wrapper_patch(installer.patch_wrapper(customized)), customized)
+
+    def test_existing_load_handler_is_not_overwritten(self):
+        customized = WRAPPER_FIXTURE.replace('id: content', 'id: content\n        onLoaded: customInitialization()')
+        with self.assertRaises(RuntimeError):
+            installer.patch_wrapper(customized)
+
+    def test_unsupported_wrapper_is_rejected_before_installation(self):
+        with self.assertRaises(RuntimeError):
+            installer.patch_wrapper('Item { Loader { active: customPolicy } }')
 
 
 class AudioSettingsTests(unittest.TestCase):
@@ -141,6 +165,7 @@ class InstallationTests(unittest.TestCase):
             dashboard.mkdir(parents=True)
             (shell / 'shell.qml').write_text('import Quickshell\nShellRoot {}\n')
             (dashboard / 'Content.qml').write_text(FIXTURE)
+            (dashboard / 'Wrapper.qml').write_text(WRAPPER_FIXTURE)
             env = {'XDG_CONFIG_HOME': str(config_home), 'XDG_DATA_HOME': str(data_home)}
             with patch.dict(installer.os.environ, env), patch.object(installer, 'verify_easyeffects'), \
                     patch.object(installer.shutil, 'which', return_value='/usr/bin/qs'), \
@@ -148,6 +173,7 @@ class InstallationTests(unittest.TestCase):
                 args = ['--no-packages', '--no-audio-setup', '--no-autostart', '--no-restart']
                 installer.main(args)
                 self.assertTrue((dashboard / 'EqualizerTab.qml').is_file())
+                self.assertIn(installer.WRAPPER_CACHED, (dashboard / 'Wrapper.qml').read_text())
                 self.assertTrue((dashboard / 'sound/easyeffects.py').is_file())
                 first = (dashboard / 'Content.qml').read_text()
                 installer.main(args)
@@ -156,8 +182,32 @@ class InstallationTests(unittest.TestCase):
                 self.assertEqual(json.loads(preset.read_text())['output']['equalizer#0']['num-bands'], 10)
                 installer.main(['--uninstall', '--no-restart'])
                 self.assertFalse((dashboard / 'EqualizerTab.qml').exists())
+                self.assertEqual((dashboard / 'Wrapper.qml').read_text(), WRAPPER_FIXTURE)
                 self.assertEqual((dashboard / 'Content.qml').read_text().split(), FIXTURE.split())
                 self.assertTrue(preset.is_file())
+
+    def test_upgrade_existing_tab_preserves_custom_wrapper(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            config = base / 'config'
+            shell = config / 'quickshell/caelestia'
+            dashboard = shell / 'modules/dashboard'
+            dashboard.mkdir(parents=True)
+            (shell / 'shell.qml').write_text('import Quickshell\nShellRoot {}\n')
+            navigation = installer.patch_navigation(FIXTURE)
+            wrapper = WRAPPER_FIXTURE.replace('id: root', 'id: root\n    property int customSetting: 42')
+            (dashboard / 'Content.qml').write_text(navigation)
+            (dashboard / 'Wrapper.qml').write_text(wrapper)
+            (dashboard / 'EqualizerTab.qml').write_text('Item {}')
+            env = {'XDG_CONFIG_HOME': str(config), 'XDG_DATA_HOME': str(base / 'data')}
+            with patch.dict(installer.os.environ, env), patch.object(installer, 'verify_easyeffects'), \
+                    patch.object(installer.shutil, 'which', return_value='/usr/bin/qs'), \
+                    patch.object(installer.os, 'geteuid', return_value=1000):
+                installer.main(['--no-packages', '--no-audio-setup', '--no-autostart', '--no-restart'])
+            self.assertEqual((dashboard / 'Content.qml').read_text(), navigation)
+            self.assertIn('customSetting: 42', (dashboard / 'Wrapper.qml').read_text())
+            self.assertIn(installer.WRAPPER_CACHED, (dashboard / 'Wrapper.qml').read_text())
+            self.assertEqual((dashboard / 'EqualizerTab.qml').read_bytes(), (ROOT / 'assets/EqualizerTab.qml').read_bytes())
 
     def test_failed_atomic_write_keeps_original_and_cleans_temporary_file(self):
         with tempfile.TemporaryDirectory() as temp:

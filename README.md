@@ -77,7 +77,7 @@ The installer:
 3. Starts EasyEffects in the background and checks its local control socket.
 4. Keeps an existing `equalizer#0` and its settings. If it is missing, adds a **flat ten-band output equalizer** while retaining the existing effect chain, input effects, and blocklists.
 5. Enables EasyEffects at login through a user systemd service, or XDG autostart if a user systemd session is unavailable.
-6. Backs up changed files, installs the dashboard tab, and reloads Caelestia. If the reload interface is unavailable, it restarts the running shell.
+6. Backs up changed files, installs the dashboard tab and a narrow wrapper change that keeps the selected Equalizer page alive while closed, and reloads Caelestia. If the reload interface is unavailable, it restarts the running shell.
 
 Open the **top dashboard → Equalizer**. Fresh setups begin flat; installing does not automatically apply a bass boost. Existing bypass settings are retained.
 
@@ -129,7 +129,7 @@ Reinstalling is safe: it avoids duplicate tabs and retains an existing equalizer
 ./install.sh --uninstall
 ```
 
-Removes the tab and its helper while retaining the rest of the dashboard. It keeps EasyEffects, its audio settings, the optional preset, and startup configuration so your audio continues to work.
+Removes the tab and its helper and restores the dashboard wrapper’s original loading policy while retaining the rest of the dashboard. It keeps EasyEffects, its audio settings, the optional preset, and startup configuration so your audio continues to work.
 
 Backups are stored under:
 
@@ -148,6 +148,8 @@ systemctl --user disable easyeffects.service
 For XDG autostart installations, remove `~/.config/autostart/com.github.wwmm.easyeffects.desktop` instead. These are optional; uninstalling the tab does not remove them.
 
 ## Performance reports
+
+Version 1.0.3 keeps the selected Equalizer page alive when the drawer closes, avoiding rebuilding its controls on every opening. The first visual build is asynchronous; polling pauses while the page is hidden, and settings refresh when it becomes visible again. Other selected tabs keep their original unload behavior. See the [opening check](docs/performance/opening-1.0.3.md) for local measurements and their limits.
 
 Version 1.0.2 sends only edited bands and avoids a redundant full read before each adjustment. A ten-band single-slider edit uses 29 socket requests instead of 88 in the regression test. This is a control-traffic improvement, not an FPS measurement or a confirmed fix for idle lag.
 

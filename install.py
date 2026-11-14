@@ -111,6 +111,46 @@ def remove_navigation(original):
     return updated
 
 
+WRAPPER_ACTIVE = 'root.shouldBeActive || root.visible'
+WRAPPER_CACHED = WRAPPER_ACTIVE + ' || root.equalizerPageRetained'
+WRAPPER_LOAD_HANDLER = '        onLoaded: Qt.callLater(root.updateEqualizerPageRetention)\n'
+WRAPPER_CACHE_BLOCK = """    // >>> caelestia-equalizer: selected page cache >>>
+    property bool equalizerPageRetained: false
+
+    function updateEqualizerPageRetention() {
+        const tabs = (content.item as Content)?.dashboardTabs;
+        equalizerPageRetained = !!tabs && tabs[root.screenState.dashboardTab]?.iconName === "equalizer";
+    }
+
+    Connections {
+        target: root.screenState
+        function onDashboardTabChanged() { Qt.callLater(root.updateEqualizerPageRetention); }
+        function onDashboardChanged() { Qt.callLater(root.updateEqualizerPageRetention); }
+    }
+    // <<< caelestia-equalizer: selected page cache <<<
+"""
+
+
+def patch_wrapper(original):
+    """Retain the selected page without binding Loader.active to its own item."""
+    if WRAPPER_CACHED in original and WRAPPER_CACHE_BLOCK in original and WRAPPER_LOAD_HANDLER in original:
+        return original
+    pattern = re.compile(r'(^[ \t]*active:\s*)root\.shouldBeActive\s*\|\|\s*root\.visible[ \t]*$', re.M)
+    updated, count = pattern.subn(lambda match: match.group(1) + WRAPPER_CACHED, original)
+    if (count != 1 or '    readonly property real nonAnimHeight:' not in original or
+            '        id: content\n' not in original or re.search(r'\bonLoaded\s*:', original)):
+        raise RuntimeError('Unsupported Caelestia dashboard wrapper: could not find its loading policy. '
+                           'No dashboard files were changed.')
+    updated = updated.replace('    readonly property real nonAnimHeight:', WRAPPER_CACHE_BLOCK + '\n    readonly property real nonAnimHeight:', 1)
+    return updated.replace('        id: content\n', '        id: content\n' + WRAPPER_LOAD_HANDLER, 1)
+
+
+def remove_wrapper_patch(original):
+    return (original.replace(WRAPPER_CACHE_BLOCK + '\n', '')
+            .replace(WRAPPER_LOAD_HANDLER, '')
+            .replace(WRAPPER_CACHED, WRAPPER_ACTIVE))
+
+
 def set_ini_values(text, section, values):
     """Change only specified keys; retain other settings, comments and KDE groups."""
     header = f'[{section}]'
@@ -344,6 +384,11 @@ def main(argv=None):
     content = shell_dir / 'modules/dashboard/Content.qml'
     if not (shell_dir / 'shell.qml').is_file() or not content.is_file():
         raise RuntimeError('Caelestia was not found at ' + str(shell_dir) + '. Use --shell-dir PATH for a custom installation.')
+    wrapper = content.with_name('Wrapper.qml')
+    if not wrapper.is_file():
+        raise RuntimeError('Caelestia dashboard wrapper was not found at ' + str(wrapper))
+    original_wrapper = wrapper.read_text()
+    updated_wrapper = remove_wrapper_patch(original_wrapper) if args.uninstall else patch_wrapper(original_wrapper)
     original = content.read_text()
     updated = remove_navigation(original) if args.uninstall else patch_navigation(original)
     backup_dir = shell_dir / 'equalizer-installer-backups' / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
@@ -351,11 +396,14 @@ def main(argv=None):
     if args.uninstall:
         shutil.copy2(content, backup_dir / 'Content.qml')
         atomic_write(content, updated)
+        if updated_wrapper != original_wrapper:
+            shutil.copy2(wrapper, backup_dir / 'Wrapper.qml')
+            atomic_write(wrapper, updated_wrapper)
         for target in (content.parent / 'EqualizerTab.qml', content.parent / 'sound/easyeffects.py'):
             if target.exists():
                 shutil.copy2(target, backup_dir / target.name)
                 target.unlink()
-        if updated != original and not args.no_restart:
+        if (updated != original or updated_wrapper != original_wrapper) and not args.no_restart:
             reload_shell(shell_dir)
         print('Equalizer tab removed. EasyEffects, its audio settings and autostart were kept.')
         return
@@ -373,16 +421,18 @@ def main(argv=None):
     install_preset(data_home)
     target_files = [(HERE / 'assets/EqualizerTab.qml', content.parent / 'EqualizerTab.qml'),
                     (HERE / 'assets/sound/easyeffects.py', content.parent / 'sound/easyeffects.py')]
-    changed = updated != original or any(not target.exists() or target.read_bytes() != source.read_bytes() for source, target in target_files)
+    changed = updated != original or updated_wrapper != original_wrapper or any(not target.exists() or target.read_bytes() != source.read_bytes() for source, target in target_files)
     if changed:
         shutil.copy2(content, backup_dir / 'Content.qml')
-        originals = {content: original}
+        shutil.copy2(wrapper, backup_dir / 'Wrapper.qml')
+        originals = {content: original, wrapper: original_wrapper}
         try:
             for source, target in target_files:
                 originals[target] = target.read_text() if target.exists() else None
                 if target.exists():
                     shutil.copy2(target, backup_dir / target.name)
                 atomic_write(target, source.read_text())
+            atomic_write(wrapper, updated_wrapper)
             atomic_write(content, updated)
         except Exception:
             for target, text in originals.items():
