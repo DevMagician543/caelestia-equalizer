@@ -72,12 +72,14 @@ Or download and extract the installer archive from [Releases](https://github.com
 
 The installer:
 
-1. Checks that the Caelestia dashboard has a supported layout.
+1. Finds Caelestia in your user config, a running Quickshell instance, or the system config directories and checks that its dashboard layout is supported.
 2. Installs missing `easyeffects` and `lsp-plugins-lv2` packages using `sudo pacman -S --needed`. It does not perform a system upgrade.
 3. Starts EasyEffects in the background and checks its local control socket.
 4. Keeps an existing `equalizer#0` and its settings. If it is missing, adds a **flat ten-band output equalizer** while retaining the existing effect chain, input effects, and blocklists.
 5. Enables EasyEffects at login through a user systemd service, or XDG autostart if a user systemd session is unavailable.
 6. Backs up changed files, installs the dashboard tab and a narrow wrapper change that keeps the selected Equalizer page alive while closed, and reloads Caelestia. If the reload interface is unavailable, it restarts the running shell.
+
+For a system package such as one installed under `/etc/xdg`, the installer creates a user-owned copy under `$XDG_CONFIG_HOME/quickshell/caelestia` (usually `~/.config/quickshell/caelestia`). Package updates apply to the system copy. The user copy takes precedence when launching with `qs -c caelestia`. See the [Caelestia installation guide](https://github.com/caelestia-dots/shell#installation).
 
 Open the **top dashboard → Equalizer**. Fresh setups begin flat; installing does not automatically apply a bass boost. Existing bypass settings are retained.
 
@@ -120,6 +122,8 @@ cd caelestia-equalizer
 git pull --ff-only
 ./install.sh
 ```
+
+Already have the repository folder? Run the update commands above from that folder.
 
 Reinstalling is safe: it avoids duplicate tabs and retains an existing equalizer’s tuning. After an upstream Caelestia update, run the installer again if the custom tab disappears.
 

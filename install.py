@@ -3,6 +3,7 @@
 
 import argparse
 import configparser
+from contextlib import ExitStack
 from datetime import datetime
 import importlib.util
 import json
@@ -349,8 +350,81 @@ def install_preset(data_home):
     print('Created optional flat preset:', preset_path)
 
 
+def has_dashboard(path):
+    return (path / 'shell.qml').is_file() and (path / 'modules/dashboard/Content.qml').is_file()
+
+
+def system_shell_dirs():
+    roots = os.environ.get('XDG_CONFIG_DIRS') or '/etc/xdg'
+    return [Path(root) / 'quickshell/caelestia' for root in roots.split(':') if Path(root).is_absolute()]
+
+
+def find_shell(config_home, override, uninstall):
+    """Return the source directory and the directory the installer may edit."""
+    user_shell = config_home / 'quickshell/caelestia'
+    system_dirs = system_shell_dirs()
+    if override is not None:
+        source = Path(override).expanduser().resolve()
+        if not has_dashboard(source):
+            raise RuntimeError(f'Caelestia was not found at {source}. Pass the directory containing shell.qml to --shell-dir.')
+    elif has_dashboard(user_shell):
+        source = user_shell.resolve()
+    else:
+        running = set()
+        if shutil.which('qs'):
+            result = command('qs', 'list', '--all', check=False)
+            for match in re.finditer(r'^\s*Config path: (.+)$', result.stdout, re.M):
+                config = Path(match.group(1).strip().strip('"'))
+                candidate = config.parent.resolve()
+                # Other Quickshell configs can be running in the same session.
+                if (config.name == 'shell.qml' and has_dashboard(candidate) and
+                        'import Caelestia' in (candidate / 'modules/dashboard/Content.qml').read_text()):
+                    running.add(candidate)
+        if len(running) > 1:
+            choices = ', '.join(str(path) for path in sorted(running))
+            raise RuntimeError(f'Multiple Caelestia shells are running: {choices}. Choose one with --shell-dir.')
+        source = next(iter(running), None)
+        if source is None:
+            source = next((path.resolve() for path in system_dirs if has_dashboard(path)), None)
+        if source is None:
+            raise RuntimeError(f'Caelestia was not found. Checked {user_shell} and the system config directories. '
+                               'Start Caelestia and retry, or use --shell-dir with the folder containing shell.qml.')
+
+    protected = source in {path.resolve() for path in system_dirs} or any(
+        source.is_relative_to(root) for root in (Path('/etc'), Path('/usr'), Path('/nix/store'))
+    )
+    if protected or not os.access(source / 'modules/dashboard', os.W_OK):
+        if uninstall:
+            raise RuntimeError(f'No writable Equalizer installation at {source}. Use --shell-dir for a custom user copy.')
+        if user_shell.exists() or user_shell.is_symlink():
+            raise RuntimeError(f'Cannot create a user copy at {user_shell} because that path already exists. '
+                               'Choose a writable Caelestia config with --shell-dir.')
+        return source, user_shell
+    return source, source
+
+
+def shell_running(shell_dir):
+    return 'Instance ' in command('qs', '-p', str(shell_dir), 'list', check=False).stdout
+
+
+def switch_shell(source, destination):
+    command('qs', '-p', str(source), 'kill')
+    for _ in range(50):
+        if not shell_running(source):
+            break
+        time.sleep(0.1)
+    else:
+        raise RuntimeError('The old Caelestia instance did not stop. Restart it to use the user copy.')
+    try:
+        command('qs', '-p', str(destination), '-n', '-d')
+    except subprocess.SubprocessError:
+        command('qs', '-p', str(source), '-n', '-d', check=False)
+        raise RuntimeError(f'Could not start Caelestia from {destination}. The installer requested a restart of the original shell.') from None
+    print('Caelestia restarted with the user config.')
+
+
 def reload_shell(shell_dir):
-    if 'Instance ' not in command('qs', '-p', str(shell_dir), 'list', check=False).stdout:
+    if not shell_running(shell_dir):
         print('Caelestia is not running; the tab will appear on its next start.')
         return
     result = command('qs', '-p', str(shell_dir), 'ipc', 'call', 'appearance', 'reloadShell', check=False)
@@ -359,7 +433,7 @@ def reload_shell(shell_dir):
         return
     command('qs', '-p', str(shell_dir), 'kill')
     for _ in range(50):
-        if 'Instance ' not in command('qs', '-p', str(shell_dir), 'list', check=False).stdout:
+        if not shell_running(shell_dir):
             break
         time.sleep(0.1)
     command('qs', '-p', str(shell_dir), '-n', '-d')
@@ -378,12 +452,11 @@ def main(argv=None):
     if os.geteuid() == 0:
         raise RuntimeError('Run ./install.sh as your normal desktop user, not with sudo. '
                            'Only package installation uses sudo.')
-    config_home = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
+    config_home = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')).expanduser().resolve()
     data_home = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
-    shell_dir = (args.shell_dir or Path(os.environ.get('CAELESTIA_DIR', config_home / 'quickshell/caelestia'))).expanduser().resolve()
-    content = shell_dir / 'modules/dashboard/Content.qml'
-    if not (shell_dir / 'shell.qml').is_file() or not content.is_file():
-        raise RuntimeError('Caelestia was not found at ' + str(shell_dir) + '. Use --shell-dir PATH for a custom installation.')
+    override = args.shell_dir if args.shell_dir is not None else os.environ.get('CAELESTIA_DIR') or None
+    source, shell_dir = find_shell(config_home, override, args.uninstall)
+    content = source / 'modules/dashboard/Content.qml'
     wrapper = content.with_name('Wrapper.qml')
     if not wrapper.is_file():
         raise RuntimeError('Caelestia dashboard wrapper was not found at ' + str(wrapper))
@@ -391,6 +464,46 @@ def main(argv=None):
     updated_wrapper = remove_wrapper_patch(original_wrapper) if args.uninstall else patch_wrapper(original_wrapper)
     original = content.read_text()
     updated = remove_navigation(original) if args.uninstall else patch_navigation(original)
+    with ExitStack() as cleanup:
+        install_dir = shell_dir
+        if source != shell_dir:
+            shell_dir.parent.mkdir(parents=True, exist_ok=True)
+            staging = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix='.equalizer-', dir=shell_dir.parent)))
+            install_dir = staging / 'caelestia'
+            shutil.copytree(source, install_dir)
+            # Package modes can be read-only, even on a user-owned copy.
+            for directory, _, _ in os.walk(install_dir):
+                path = Path(directory)
+                path.chmod(path.stat().st_mode | 0o700)
+        backup = install_equalizer(args, config_home, data_home, install_dir, original, updated,
+                          original_wrapper, updated_wrapper)
+        if source != shell_dir:
+            if shell_dir.exists() or shell_dir.is_symlink():
+                raise RuntimeError(f'{shell_dir} appeared during installation. Existing config kept.')
+            install_dir.rename(shell_dir)
+            print(f'Installed a user copy of Caelestia at {shell_dir}.')
+    if not args.uninstall:
+        if backup is not None:
+            print('Installed Equalizer tab. Backups:', shell_dir / backup)
+        if not args.no_restart:
+            if source != shell_dir and shell_running(source):
+                switch_shell(source, shell_dir)
+            elif not shell_running(shell_dir) and shell_dir == config_home / 'quickshell/caelestia':
+                packaged = next((path.resolve() for path in system_shell_dirs()
+                                 if has_dashboard(path) and shell_running(path.resolve())), None)
+                if packaged is not None:
+                    switch_shell(packaged, shell_dir)
+                else:
+                    reload_shell(shell_dir)
+            else:
+                reload_shell(shell_dir)
+        print('Ready. Open the top dashboard and select Equalizer.')
+
+
+def install_equalizer(args, config_home, data_home, shell_dir, original, updated,
+                      original_wrapper, updated_wrapper):
+    content = shell_dir / 'modules/dashboard/Content.qml'
+    wrapper = content.with_name('Wrapper.qml')
     backup_dir = shell_dir / 'equalizer-installer-backups' / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     backup_dir.mkdir(parents=True)
     if args.uninstall:
@@ -441,12 +554,8 @@ def main(argv=None):
                 else:
                     atomic_write(target, text)
             raise
-        print('Installed Equalizer tab. Backups:', backup_dir)
-    else:
-        print('Equalizer tab is already up to date.')
-    if not args.no_restart:
-        reload_shell(shell_dir)
-    print('Ready. Open the top dashboard and select Equalizer.')
+        return backup_dir.relative_to(shell_dir)
+    print('Equalizer tab is already up to date.')
 
 
 if __name__ == '__main__':

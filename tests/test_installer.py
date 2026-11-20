@@ -154,6 +154,65 @@ class AudioSetupTests(unittest.TestCase):
             self.assertFalse((db / 'equalizerrc').exists())
 
 
+class ShellDiscoveryTests(unittest.TestCase):
+    def make_shell(self, directory):
+        dashboard = directory / 'modules/dashboard'
+        dashboard.mkdir(parents=True)
+        (directory / 'shell.qml').write_text('import Quickshell\nShellRoot {}\n')
+        (dashboard / 'Content.qml').write_text(FIXTURE)
+        (dashboard / 'Wrapper.qml').write_text(WRAPPER_FIXTURE)
+        return directory
+
+    def test_running_custom_config_with_spaces_is_detected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            custom = self.make_shell(base / 'my desktop config')
+            listed = f'Instance other:\n  Config path: {base}/overview/shell.qml\nInstance custom:\n  Config path: {custom}/shell.qml\n'
+            with patch.object(installer.shutil, 'which', return_value='/usr/bin/qs'), \
+                    patch.object(installer, 'command', return_value=Mock(stdout=listed)):
+                self.assertEqual(installer.find_shell(base / 'user', None, False), (custom, custom))
+
+    def test_explicit_bad_path_does_not_fall_back(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            self.make_shell(base / 'quickshell/caelestia')
+            with self.assertRaisesRegex(RuntimeError, 'Caelestia was not found at'):
+                installer.find_shell(base, base / 'bad', False)
+
+    def test_packaged_install_stages_a_copy_and_uninstalls_from_it(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            package = self.make_shell(base / 'system/quickshell/caelestia')
+            config = base / 'user'
+            destination = config / 'quickshell/caelestia'
+            env = {'XDG_CONFIG_HOME': str(config), 'XDG_CONFIG_DIRS': str(base / 'system'),
+                   'XDG_DATA_HOME': str(base / 'data'), 'CAELESTIA_DIR': ''}
+            args = ['--no-packages', '--no-audio-setup', '--no-autostart', '--no-restart']
+            with patch.dict(installer.os.environ, env), patch.object(installer, 'verify_easyeffects'), \
+                    patch.object(installer.shutil, 'which', return_value='/usr/bin/qs'), \
+                    patch.object(installer, 'command', return_value=Mock(stdout='')), \
+                    patch.object(installer.os, 'geteuid', return_value=1000):
+                with patch.object(installer, 'install_preset', side_effect=OSError('simulated failure')):
+                    with self.assertRaisesRegex(OSError, 'simulated failure'):
+                        installer.main(args)
+                self.assertFalse(destination.exists())
+                installer.main(args)
+                self.assertIn('equalizerComponent', (destination / 'modules/dashboard/Content.qml').read_text())
+                self.assertEqual((package / 'modules/dashboard/Content.qml').read_text(), FIXTURE)
+                self.assertEqual((package / 'modules/dashboard/Wrapper.qml').read_text(), WRAPPER_FIXTURE)
+                installer.main(['--uninstall', '--no-restart'])
+                self.assertFalse((destination / 'modules/dashboard/EqualizerTab.qml').exists())
+
+    def test_failed_shell_migration_restarts_original(self):
+        from subprocess import CalledProcessError
+        source, destination = Path('/system/caelestia'), Path('/user/caelestia')
+        with patch.object(installer, 'shell_running', return_value=False), \
+                patch.object(installer, 'command', side_effect=[None, CalledProcessError(1, 'qs'), None]) as run:
+            with self.assertRaisesRegex(RuntimeError, 'Could not start Caelestia'):
+                installer.switch_shell(source, destination)
+        run.assert_called_with('qs', '-p', str(source), '-n', '-d', check=False)
+
+
 class InstallationTests(unittest.TestCase):
     def test_install_reinstall_uninstall_in_isolated_home(self):
         with tempfile.TemporaryDirectory() as temp:

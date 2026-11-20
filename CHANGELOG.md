@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.4
+
+- Detect custom Caelestia paths from running Quickshell instances and find packaged configs in the system XDG directories.
+- Install into a user-owned copy for packaged configs and restart a running packaged shell with that copy.
+- Simplify the Equalizer header while keeping the switch and footer controls.
+
 ## 1.0.3
 
 - Retain the dashboard content while Equalizer is selected, avoiding repeated control construction during the drawer’s opening animation.
