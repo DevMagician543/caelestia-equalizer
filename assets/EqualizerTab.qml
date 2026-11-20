@@ -13,7 +13,7 @@ Item {
     id: root
 
     implicitWidth: 840
-    implicitHeight: 570
+    implicitHeight: 520
 
     property var bands: []
     property bool ready: false
@@ -195,32 +195,6 @@ Item {
             anchors.fill: parent
             spacing: Tokens.spacing.medium
 
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.leftMargin: Tokens.padding.large
-                Layout.rightMargin: Tokens.padding.large
-                ColumnLayout {
-                    spacing: Tokens.spacing.extraSmall
-                    StyledText {
-                        text: qsTr("Equalizer")
-                        font: Tokens.font.body.builders.large.size(28).weight(Font.DemiBold).build()
-                        color: Colours.palette.m3onSurface
-                    }
-                    StyledText {
-                        text: qsTr("Make room for the sound you love")
-                        color: Colours.palette.m3onSurfaceVariant
-                    }
-                }
-                Item { Layout.fillWidth: true }
-                StyledText {
-                    text: !root.ready ? root.status : root.busy || saveTimer.running ? qsTr("Saving…") : root.audible ? qsTr("●  Live · EasyEffects") : qsTr("○  Bypassed")
-                    color: root.ready && !root.bypass && !root.globalBypass ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
-                    wrapMode: Text.WordWrap
-                    Layout.maximumWidth: 310
-                    horizontalAlignment: Text.AlignRight
-                }
-            }
-
             StyledRect {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -234,6 +208,7 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
+
                         StyledText {
                             text: qsTr("Output equalizer")
                             font: Tokens.font.body.builders.large.weight(Font.DemiBold).build()
@@ -241,7 +216,8 @@ Item {
                         }
                         Item { Layout.fillWidth: true }
                         StyledText {
-                            text: root.ready ? (root.bypass ? qsTr("Off") : qsTr("On")) : ""
+                            visible: root.ready
+                            text: root.bypass ? qsTr("Off") : qsTr("On")
                             color: Colours.palette.m3onSurfaceVariant
                         }
                         StyledSwitch {
@@ -249,14 +225,15 @@ Item {
                             checked: root.ready && !root.bypass
                             onClicked: { root.revision++; root.bypass = !checked; root.run(["enabled", checked ? "true" : "false"]); }
                             Accessible.name: qsTr("Enable output equalizer")
+                            Controls.ToolTip.visible: hovered
+                            Controls.ToolTip.delay: 500
+                            Controls.ToolTip.text: Accessible.name
                         }
                     }
 
                     StyledText {
-                        visible: !root.ready || root.globalBypass || root.bypass
-                        text: !root.ready ? qsTr("Add an Equalizer to the EasyEffects output chain and start EasyEffects, then retry.") :
-                              root.globalBypass ? qsTr("EasyEffects global bypass is on. Turn it off in EasyEffects to hear this equalizer.") :
-                              qsTr("The equalizer is bypassed. Turn it on to hear changes.")
+                        visible: !root.ready || root.globalBypass
+                        text: !root.ready ? root.status : qsTr("Turn off global bypass in EasyEffects to hear the equalizer.")
                         color: Colours.palette.m3onSurfaceVariant
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true

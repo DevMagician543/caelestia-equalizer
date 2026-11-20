@@ -159,7 +159,7 @@ If the dashboard or visualizer becomes slow, report whether it happens only whil
 
 | Message or symptom | What to do |
 |---|---|
-| EasyEffects is not running | Run `easyeffects --service-mode --hide-window`, then **Reconnect**. For systemd startup, inspect `systemctl --user status easyeffects.service`. |
+| EasyEffects is not running | Run `easyeffects --service-mode --hide-window`, then click **Reconnect**. For systemd startup, inspect `systemctl --user status easyeffects.service`. |
 | Equalizer audio plugin missing | Install `lsp-plugins-lv2`, restart EasyEffects, then reconnect. |
 | Audio plugin is not loaded | Restart EasyEffects after installing LSP plugins. |
 | No equalizer in the output chain | Run the installer again, or add an output Equalizer in EasyEffects. The tab controls instance `equalizer#0`. |
