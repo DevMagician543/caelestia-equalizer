@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Effects
 import QtQuick.Layouts
 import QtQuick.Controls as Controls
 import Quickshell.Io
@@ -61,6 +62,7 @@ Item {
     property bool received: false
     property bool initialized: false
     readonly property bool audible: ready && !bypass && !globalBypass
+    signal presetApplied()
 
     function localBands() {
         const values = [];
@@ -126,6 +128,7 @@ Item {
         const values = gainsFor(index);
         for (let i = 0; i < values.length; i++) bandModel.setProperty(i, "gain", values[i]);
         localBands();
+        presetApplied();
         run(["preset", JSON.stringify(values)]);
     }
 
@@ -315,8 +318,15 @@ Item {
                                     required property real frequency
                                     required property real gain
                                     property real visualGain: gain
+                                    readonly property Item knobItem: knob
+                                    readonly property Item railItem: rail
+                                    readonly property real pulse: presetLightning.pulseAt(index)
+                                    readonly property real strike: presetLightning.strikeAt(index)
                                     onVisualGainChanged: curve.requestPaint()
-                                    Behavior on visualGain { enabled: !bandSlider.pressed; Anim { type: Anim.FastSpatial } }
+                                    Behavior on visualGain {
+                                        enabled: !bandSlider.pressed
+                                        NumberAnimation { duration: 350; easing.type: Easing.OutQuart }
+                                    }
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     Layout.minimumWidth: 48
@@ -344,9 +354,15 @@ Item {
                                         wheelEnabled: true
                                         onPressedChanged: {
                                             root.dragging += pressed ? 1 : -1;
-                                            if (!pressed) root.save();
+                                            if (!pressed) {
+                                                root.save();
+                                                releaseFlash.restart();
+                                            }
                                         }
-                                        onMoved: root.preview(bandColumn.index, value)
+                                        onMoved: {
+                                            root.preview(bandColumn.index, value);
+                                            movementPop.restart();
+                                        }
                                         Keys.onEscapePressed: focus = false
                                         Keys.onSpacePressed: root.preview(bandColumn.index, 0)
                                         Accessible.name: qsTr("%1 Hz gain. Space to reset.").arg(Math.round(bandColumn.frequency))
@@ -355,6 +371,7 @@ Item {
                                         Controls.ToolTip.text: qsTr("Scroll or use arrow keys · Space to reset")
 
                                         background: Rectangle {
+                                            id: rail
                                             x: bandSlider.leftPadding + (bandSlider.availableWidth - width) / 2
                                             y: bandSlider.topPadding + bandSlider.handle.height / 2
                                             width: 6
@@ -374,13 +391,45 @@ Item {
                                                 width: 14; height: 2; radius: 1
                                                 color: Colours.palette.m3outline
                                             }
+                                            Item {
+                                                y: (1 - (bandColumn.visualGain + 12) / 24) * parent.height
+                                                width: parent.width
+                                                height: parent.height - y
+                                                clip: true
+                                                visible: bandColumn.pulse < 1
+
+                                                Rectangle {
+                                                    anchors.fill: parent
+                                                    color: presetLightning.accent
+                                                    radius: 3
+                                                    opacity: (1 - bandColumn.pulse) * presetLightning.fade * 0.56
+                                                }
+                                                Rectangle {
+                                                    readonly property real progress: 1 - (1 - bandColumn.pulse) ** 4
+                                                    width: parent.width
+                                                    height: 46
+                                                    y: progress * (parent.height + height) - height
+                                                    opacity: Math.min(1, 2 * Math.sin(progress * Math.PI)) * presetLightning.fade
+                                                    gradient: Gradient {
+                                                        GradientStop { position: 0; color: Qt.alpha(presetLightning.accent, 0) }
+                                                        GradientStop { position: 0.5; color: presetLightning.core }
+                                                        GradientStop { position: 1; color: Qt.alpha(presetLightning.accent, 0) }
+                                                    }
+                                                }
+                                            }
                                         }
                                         handle: Rectangle {
+                                            id: knob
+
+                                            property real interactionScale: bandSlider.pressed ? 1.25 : bandSlider.hovered ? 1.08 : 1
+                                            property real movementScale: 1
+                                            property real flashOpacity: 0
+
                                             x: bandSlider.leftPadding + (bandSlider.availableWidth - width) / 2
                                             y: bandSlider.topPadding + (1 - (bandColumn.visualGain + 12) / 24) * (bandSlider.availableHeight - height)
                                             width: 28; height: 16; radius: 8
-                                            scale: bandSlider.pressed ? 1.18 : bandSlider.hovered ? 1.08 : 1
-                                            color: Colours.palette.m3primary
+                                            scale: interactionScale * movementScale + bandColumn.strike * 0.4
+                                            color: Qt.lighter(Colours.palette.m3primary, bandSlider.pressed ? 1.30 : bandSlider.hovered ? 1.15 : 1)
                                             border.width: bandSlider.activeFocus ? 2 : 0
                                             border.color: Colours.palette.m3onSurface
                                             Rectangle {
@@ -388,7 +437,44 @@ Item {
                                                 width: 10; height: 2; radius: 1
                                                 color: Colours.palette.m3onPrimary
                                             }
-                                            Behavior on scale { Anim { type: Anim.FastSpatial } }
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                radius: knob.radius
+                                                color: presetLightning.core
+                                                opacity: Math.max(knob.flashOpacity, (1 - bandColumn.pulse) * presetLightning.fade * 0.85)
+                                            }
+
+                                            Behavior on interactionScale {
+                                                NumberAnimation { duration: 150; easing.type: Easing.OutBack }
+                                            }
+                                            Behavior on color { ColorAnimation { duration: 150 } }
+
+                                            SequentialAnimation {
+                                                id: movementPop
+                                                NumberAnimation {
+                                                    target: knob
+                                                    property: "movementScale"
+                                                    to: 1.12
+                                                    duration: 100
+                                                    easing.type: Easing.OutQuad
+                                                }
+                                                NumberAnimation {
+                                                    target: knob
+                                                    property: "movementScale"
+                                                    to: 1
+                                                    duration: 200
+                                                    easing.type: Easing.OutCubic
+                                                }
+                                            }
+                                            NumberAnimation {
+                                                id: releaseFlash
+                                                target: knob
+                                                property: "flashOpacity"
+                                                from: 0.35
+                                                to: 0
+                                                duration: 300
+                                                easing.type: Easing.OutCubic
+                                            }
                                         }
                                     }
                                     StyledText {
@@ -397,6 +483,161 @@ Item {
                                         color: Colours.palette.m3onSurfaceVariant
                                     }
                                 }
+                            }
+                        }
+
+                        Canvas {
+                            id: presetLightning
+
+                            // Keep the Canvas as wide as the viewport, even with 32 bands.
+                            parent: bandView
+                            anchors.fill: parent
+                            z: -1
+                            visible: presetSweep.running
+                            layer.enabled: visible
+                            layer.effect: MultiEffect {
+                                shadowEnabled: true
+                                shadowColor: presetLightning.accent
+                                shadowBlur: 0.9
+                                shadowOpacity: 0.7
+                                shadowHorizontalOffset: 0
+                                shadowVerticalOffset: 0
+                            }
+
+                            readonly property color accent: Colours.palette.m3primary
+                            readonly property color core: Colours.palette.m3onSurface
+                            readonly property real sweepDuration: 650
+                            readonly property real holdUntil: sweepDuration + 150
+                            readonly property real duration: holdUntil + 800
+                            readonly property int span: lastBand - firstBand + 1
+                            readonly property real reach: firstBand + span * Math.sin(Math.min(1, elapsed / sweepDuration) * Math.PI / 2)
+                            readonly property real fade: Math.pow(1 - Math.max(0, elapsed - holdUntil) / (duration - holdUntil), 2)
+                            readonly property var strands: [
+                                { width: 15, opacity: 0.32, color: accent, amplitude: 15 },
+                                { width: 7.5, opacity: 0.58, color: Qt.lighter(accent, 1.18), amplitude: 10 },
+                                { width: 3.5, opacity: 0.8, color: Qt.lighter(accent, 1.3), amplitude: 5 }
+                            ]
+                            property int firstBand: 0
+                            property int lastBand: -1
+                            property real elapsed: 0
+
+                            function play() {
+                                if (!root.visible || !bandView.width || !sliders.count) return;
+                                const first = sliders.itemAt(0);
+                                if (!first || !first.width) return;
+                                const step = first.width + bandRow.spacing;
+                                firstBand = Math.min(sliders.count - 1, Math.floor(bandView.contentX / step));
+                                lastBand = Math.min(sliders.count - 1, Math.ceil((bandView.contentX + bandView.width) / step) - 1);
+                                presetSweep.restart();
+                                requestPaint();
+                            }
+
+                            function pulseAt(index) {
+                                if (!presetSweep.running || index < firstBand || index > lastBand || index + 0.4 > reach) return 1;
+                                const fraction = (index - firstBand + 0.4) / span;
+                                const arrival = Math.asin(fraction) / (Math.PI / 2) * sweepDuration;
+                                return Math.max(0, Math.min(1, (elapsed - arrival) / 1000));
+                            }
+
+                            function strikeAt(index) {
+                                const distance = reach - index;
+                                return presetSweep.running && index >= firstBand && index <= lastBand && distance > 0 && distance < 1
+                                    ? Math.sin(distance * Math.PI) * fade : 0;
+                            }
+
+                            onElapsedChanged: requestPaint()
+
+                            NumberAnimation {
+                                id: presetSweep
+                                target: presetLightning
+                                property: "elapsed"
+                                from: 0
+                                to: presetLightning.duration
+                                duration: presetLightning.duration
+                            }
+
+                            Connections {
+                                target: root
+                                function onPresetApplied() { presetLightning.play(); }
+                                function onVisibleChanged() { if (!root.visible) presetSweep.stop(); }
+                            }
+
+                            onPaint: {
+                                const ctx = getContext("2d");
+                                ctx.clearRect(0, 0, width, height);
+                                if (!presetSweep.running) return;
+
+                                const points = [];
+                                ctx.lineCap = "round";
+                                ctx.lineJoin = "round";
+                                for (let i = firstBand; i <= lastBand; i++) {
+                                    const band = sliders.itemAt(i);
+                                    if (!band) break;
+                                    const knob = band.knobItem;
+                                    const point = knob.mapToItem(presetLightning, knob.width / 2, knob.height / 2);
+                                    points.push(point);
+
+                                    const pulse = pulseAt(i);
+                                    if (pulse >= 1) continue;
+                                    const glow = 2 ** (-9 * pulse) * fade;
+                                    const radius = 6 + 14 * (1 - glow);
+                                    const rail = band.railItem;
+                                    const top = rail.mapToItem(presetLightning, 0, 0).y - radius;
+                                    const bottom = top + rail.height + 2 * radius;
+                                    ctx.beginPath();
+                                    ctx.moveTo(point.x - radius, top + radius);
+                                    ctx.arc(point.x, top + radius, radius, Math.PI, 2 * Math.PI);
+                                    ctx.lineTo(point.x + radius, bottom - radius);
+                                    ctx.arc(point.x, bottom - radius, radius, 0, Math.PI);
+                                    ctx.closePath();
+                                    ctx.strokeStyle = accent;
+                                    ctx.lineWidth = 12 + 4 * glow;
+                                    ctx.globalAlpha = 0.13 * glow;
+                                    ctx.stroke();
+                                    ctx.lineWidth = 4 + 3 * glow;
+                                    ctx.globalAlpha = 0.14 * glow;
+                                    ctx.stroke();
+                                }
+
+                                const tip = Math.min(reach - firstBand, points.length - 1);
+                                if (tip <= 0) return;
+                                const phase = elapsed * 0.014;
+                                for (let strandIndex = 0; strandIndex < strands.length; strandIndex++) {
+                                    const strand = strands[strandIndex];
+                                    ctx.beginPath();
+                                    ctx.moveTo(points[0].x, points[0].y);
+                                    for (let i = 0; i < tip; i++) {
+                                        const a = points[i], b = points[i + 1];
+                                        const end = Math.min(1, tip - i);
+                                        for (let step = 1; step <= 8; step++) {
+                                            const t = Math.min(end, step / 8);
+                                            const angle = phase + i * 1.9 + strandIndex * 1.7;
+                                            const bend = Math.sin(Math.PI * t) * strand.amplitude * fade;
+                                            const x = a.x + (b.x - a.x) * t + bend * 0.42 * Math.cos(angle * 0.73 + step * 2.4);
+                                            const y = a.y + (b.y - a.y) * t + bend * (Math.sin(angle + step * 2.8) + 0.48 * Math.cos(angle * 0.63 - step * 1.6));
+                                            ctx.lineTo(x, y);
+                                            if (t === end) break;
+                                        }
+                                    }
+                                    ctx.strokeStyle = strand.color;
+                                    ctx.lineWidth = strand.width;
+                                    ctx.globalAlpha = strand.opacity * fade;
+                                    ctx.stroke();
+                                }
+
+                                // Draw the handle-to-handle line over the jagged glow.
+                                ctx.beginPath();
+                                ctx.moveTo(points[0].x, points[0].y);
+                                const last = Math.ceil(tip);
+                                for (let i = 1; i < last; i++) ctx.lineTo(points[i].x, points[i].y);
+                                const a = points[last - 1], b = points[last];
+                                const fraction = tip - (last - 1);
+                                ctx.lineTo(a.x + (b.x - a.x) * fraction, a.y + (b.y - a.y) * fraction);
+                                ctx.globalAlpha = fade;
+                                ctx.strokeStyle = core;
+                                ctx.lineWidth = 3.5;
+                                ctx.stroke();
+                                ctx.globalAlpha = 1;
                             }
                         }
                     }
