@@ -19,7 +19,7 @@ An animated EasyEffects equalizer, right inside the Caelestia dashboard.
 
 Change the sound of your music, games, and podcasts without leaving the top dashboard. Choose a preset, shape individual bands, or bypass the equalizer to compare.
 
-- **Smooth motion:** animated faders, gain values, curve transitions, and button feedback.
+- **Smooth motion:** animated faders, gain values, and curve transitions, with a Caelestia-themed lightning sweep on preset changes.
 - **Eleven presets:** Flat, Bass Boost, Deep Bass, Treble Boost, Vocal, Podcast, Electronic, Rock, Classical, Gaming, and Night Listening.
 - **Comfortable controls:** drag, scroll, or use your keyboard; reset a focused band with Space.
 - **Responsive editing:** changes are grouped and queued while EasyEffects saves, keeping the controls available.
@@ -28,11 +28,11 @@ Change the sound of your music, games, and podcasts without leaving the top dash
 
 ## Preview
 
-![Animated demonstration of presets, individual adjustments, and bypass](docs/media/demo.gif)
+![A lightning sweep connects the equalizer sliders as presets change](docs/media/demo.gif)
 
-**Sound on: [watch or download the music comparison (MP4)](docs/media/demo.mp4)** · [Browse all previews](docs/media)
+**[Watch the preset animation demo (MP4)](docs/media/demo.mp4)** · [Browse all previews](docs/media)
 
-The video is a 32-second desktop recording showing the equalizer in the real Caelestia dashboard, with music and preset changes. Turn on sound to hear it. The GIF is a silent preview made from the same recording; the still screenshots show closer views of the controls. The drawn curve visualizes band gains; it is not a measured acoustic response or the exact combined filter response.
+The 11-second silent recording shows preset changes and the lightning sweep in the Caelestia dashboard. The GIF focuses on the equalizer controls. The curve visualizes band gains.
 
 <details>
 <summary>More screenshots: Vocal and bypass</summary>
