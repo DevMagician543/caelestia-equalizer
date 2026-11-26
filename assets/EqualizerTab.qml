@@ -4,11 +4,11 @@ import QtQuick
 import QtQuick.Effects
 import QtQuick.Layouts
 import QtQuick.Controls as Controls
-import Quickshell.Io
 import Caelestia.Config
 import qs.components
 import qs.components.controls
 import qs.services
+import "equalizer"
 
 Item {
     id: root
@@ -16,177 +16,36 @@ Item {
     implicitWidth: 840
     implicitHeight: 520
 
-    property var bands: []
-    property bool ready: false
-    property bool bypass: false
-    property bool globalBypass: false
-    property bool busy: false
-    property string status: qsTr("Checking EasyEffects…")
-    property string activePreset: "Custom"
-    readonly property var presetNames: ["Flat", "Bass Boost", "Deep Bass", "Treble Boost", "Vocal", "Podcast", "Electronic", "Rock", "Classical", "Gaming", "Night Listening"]
-    readonly property var shapes: [
-        [0,0,0,0,0,0,0,0,0,0], [5,5,4,3,1,0,0,0,0,0], [8,7,6,4,2,0,-1,-1,-2,-2],
-        [-1,-1,-1,0,0,1,2,3,4,5], [-3,-2,-1,0,2,3,3,2,0,-1], [-4,-3,-2,0,2,4,3,1,-1,-2],
-        [5,4,2,0,-1,0,2,3,3,2], [4,3,1,-1,0,2,3,2,1,0], [0,0,-0.5,-0.5,0,0.5,0.5,0.5,0,0],
-        [4,3,1,-1,0,2,3,2,1,1], [-5,-4,-3,-2,-1,0,0,-1,-2,-3]
-    ]
-    readonly property var anchorsHz: [31,62,125,250,500,1000,2000,4000,8000,16000]
-
-    function gainsFor(presetIndex) {
-        const shape = shapes[presetIndex];
-        return bands.map(b => {
-            const frequency = Math.max(31, Math.min(16000, b.frequency));
-            let j = 0;
-            while (j < 9 && frequency > anchorsHz[j + 1]) j++;
-            if (j === 9) return shape[9];
-            const t = Math.log(frequency / anchorsHz[j]) / Math.log(anchorsHz[j + 1] / anchorsHz[j]);
-            return Math.round((shape[j] + (shape[j + 1] - shape[j]) * t) * 10) / 10;
-        });
-    }
-
-    function matchPreset() {
-        for (let p = 0; p < presetNames.length; p++) {
-            const gains = gainsFor(p);
-            if (gains.every((gain, i) => Math.abs(gain - bands[i].gain) < 0.06)) return presetNames[p];
-        }
-        return "Custom";
-    }
-
-    // Keep delegates alive while synchronizing, so dragging and focus survive replies.
-    ListModel { id: bandModel }
-    property var pending: []
-    property var dirtyBands: ({})
-    property int revision: 0
-    property int requestRevision: 0
+    readonly property EqualizerState equalizer: EqualizerState
+    property color surfaceColor: Colours.tPalette.m3surfaceContainer
+    property bool controlsActive: visible
     property int dragging: 0
-    property bool received: false
     property bool initialized: false
-    readonly property bool audible: ready && !bypass && !globalBypass
     signal presetApplied()
 
-    function localBands() {
-        const values = [];
-        for (let i = 0; i < bandModel.count; i++) {
-            const band = bandModel.get(i);
-            values.push({frequency: band.frequency, gain: band.gain});
-        }
-        bands = values;
-        activePreset = matchPreset();
-    }
-
-    function run(args) {
-        // Coalesce edits by band, while preserving edits to different bands.
-        if (args[0] === "gains") {
-            const previous = pending.find(item => item[0] === "gains");
-            const changes = Object.assign({}, previous ? JSON.parse(previous[1]) : {}, JSON.parse(args[1]));
-            pending = pending.filter(item => item[0] !== "gains");
-            pending = [...pending, ["gains", JSON.stringify(changes)]];
-        } else if (args[0] === "preset") {
-            // A new preset supersedes all earlier band edits and presets.
-            pending = pending.filter(item => item[0] !== "gains" && item[0] !== "preset");
-            pending = [...pending, args];
-        } else {
-            pending = pending.filter(item => item[0] !== args[0]);
-            pending = [...pending, args];
-        }
-        dispatchNext();
-    }
-
-    function dispatchNext() {
-        if (busy || !pending.length) return;
-        const args = pending[0];
-        pending = pending.slice(1);
-        busy = true;
-        received = false;
-        requestRevision = revision;
-        helper.command = ["python3", Qt.resolvedUrl("sound/easyeffects.py").toString().replace(/^file:\/\//, ""), ...args];
-        helper.running = true;
-    }
-
-    function refresh() { if (!busy && !dragging && !saveTimer.running) run(["snapshot"]); }
-    function preview(index, gain) {
-        const rounded = Math.round(gain * 10) / 10;
-        if (Math.abs(bandModel.get(index).gain - rounded) < 0.05) return;
-        revision++;
-        bandModel.setProperty(index, "gain", rounded);
-        dirtyBands = Object.assign({}, dirtyBands, {[index]: rounded});
-        localBands();
-        saveTimer.restart();
-    }
-    function save() {
-        saveTimer.stop();
-        if (!ready || !Object.keys(dirtyBands).length) return;
-        const changes = dirtyBands;
-        dirtyBands = ({});
-        run(["gains", JSON.stringify(changes)]);
-    }
     function selectPreset(index) {
-        if (!ready) return;
-        saveTimer.stop();
-        dirtyBands = ({});
-        revision++;
-        const values = gainsFor(index);
-        for (let i = 0; i < values.length; i++) bandModel.setProperty(i, "gain", values[i]);
-        localBands();
+        if (!equalizer.ready) return;
+        equalizer.selectPreset(index);
         presetApplied();
-        run(["preset", JSON.stringify(values)]);
     }
 
     Component.onCompleted: {
         initialized = true;
-        refresh();
+        if (controlsActive) equalizer.refresh();
     }
-    onVisibleChanged: if (initialized && visible) refresh()
-    Timer { id: saveTimer; interval: 100; onTriggered: root.save() }
+    Component.onDestruction: {
+        if (dragging) {
+            equalizer.dragging -= dragging;
+            equalizer.save();
+        }
+    }
+    onControlsActiveChanged: if (initialized && controlsActive) equalizer.refresh()
+
     Timer {
         interval: 12000
         repeat: true
-        running: root.visible
-        onTriggered: root.refresh()
-    }
-
-    Process {
-        id: helper
-        stdout: StdioCollector {
-            onStreamFinished: {
-                root.received = true;
-                try {
-                    const result = JSON.parse(text);
-                    root.ready = result.ready === true;
-                    root.status = result.status || qsTr("No response from EasyEffects");
-                    if (root.ready && root.revision === root.requestRevision && !root.dragging && !root.pending.length && !Object.keys(root.dirtyBands).length) {
-                        if (bandModel.count !== result.bands.length) {
-                            bandModel.clear();
-                            bandModel.append(result.bands);
-                        } else {
-                            for (let i = 0; i < result.bands.length; i++) bandModel.set(i, result.bands[i]);
-                        }
-                        root.localBands();
-                        root.bypass = result.bypass;
-                        root.globalBypass = result.globalBypass;
-                    }
-                } catch (error) {
-                    root.ready = false;
-                    root.status = qsTr("Could not read EasyEffects response");
-                }
-            }
-        }
-        onExited: (exitCode, exitStatus) => {
-            root.busy = false;
-            if (exitCode !== 0 || !root.received) {
-                root.ready = false;
-                root.status = qsTr("EasyEffects helper failed. Try reconnecting.");
-            }
-            if (!root.ready) {
-                root.pending = [];
-                root.dirtyBands = ({});
-                saveTimer.stop();
-            } else {
-                // Keep the queue intact until dispatch, including edits arriving
-                // between this exit signal and the next event-loop iteration.
-                Qt.callLater(root.dispatchNext);
-            }
-        }
+        running: root.controlsActive
+        onTriggered: root.equalizer.refresh()
     }
 
     Loader {
@@ -202,7 +61,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 radius: Tokens.rounding.extraLarge
-                color: Colours.tPalette.m3surfaceContainer
+                color: root.surfaceColor
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -219,14 +78,14 @@ Item {
                         }
                         Item { Layout.fillWidth: true }
                         StyledText {
-                            visible: root.ready
-                            text: root.bypass ? qsTr("Off") : qsTr("On")
+                            visible: root.equalizer.ready
+                            text: root.equalizer.bypass ? qsTr("Off") : qsTr("On")
                             color: Colours.palette.m3onSurfaceVariant
                         }
                         StyledSwitch {
-                            disabled: !root.ready
-                            checked: root.ready && !root.bypass
-                            onClicked: { root.revision++; root.bypass = !checked; root.run(["enabled", checked ? "true" : "false"]); }
+                            disabled: !root.equalizer.ready
+                            checked: root.equalizer.ready && !root.equalizer.bypass
+                            onClicked: root.equalizer.setEnabled(checked)
                             Accessible.name: qsTr("Enable output equalizer")
                             Controls.ToolTip.visible: hovered
                             Controls.ToolTip.delay: 500
@@ -235,8 +94,8 @@ Item {
                     }
 
                     StyledText {
-                        visible: !root.ready || root.globalBypass
-                        text: !root.ready ? root.status : qsTr("Turn off global bypass in EasyEffects to hear the equalizer.")
+                        visible: !root.equalizer.ready || root.equalizer.globalBypass
+                        text: !root.equalizer.ready ? root.equalizer.status : qsTr("Turn off global bypass in EasyEffects to hear the equalizer.")
                         color: Colours.palette.m3onSurfaceVariant
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
@@ -245,7 +104,7 @@ Item {
                     Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 58
-                        opacity: root.audible ? 1 : 0.45
+                        opacity: root.equalizer.audible ? 1 : 0.45
                         Behavior on opacity { Anim {} }
                         Canvas {
                             id: curve
@@ -311,7 +170,9 @@ Item {
                             spacing: 2
                             Repeater {
                                 id: sliders
-                                model: bandModel
+                                model: root.equalizer.bandModel
+                                onItemAdded: curve.requestPaint()
+                                onItemRemoved: curve.requestPaint()
                                 delegate: ColumnLayout {
                                     id: bandColumn
                                     required property int index
@@ -348,23 +209,24 @@ Item {
                                         to: 12
                                         stepSize: 0.1
                                         value: bandColumn.gain
-                                        enabled: root.ready
+                                        enabled: root.equalizer.ready
                                         hoverEnabled: true
                                         focusPolicy: Qt.StrongFocus
                                         wheelEnabled: true
                                         onPressedChanged: {
                                             root.dragging += pressed ? 1 : -1;
+                                            root.equalizer.dragging += pressed ? 1 : -1;
                                             if (!pressed) {
-                                                root.save();
+                                                root.equalizer.save();
                                                 releaseFlash.restart();
                                             }
                                         }
                                         onMoved: {
-                                            root.preview(bandColumn.index, value);
+                                            root.equalizer.preview(bandColumn.index, value);
                                             movementPop.restart();
                                         }
                                         Keys.onEscapePressed: focus = false
-                                        Keys.onSpacePressed: root.preview(bandColumn.index, 0)
+                                        Keys.onSpacePressed: root.equalizer.preview(bandColumn.index, 0)
                                         Accessible.name: qsTr("%1 Hz gain. Space to reset.").arg(Math.round(bandColumn.frequency))
                                         Controls.ToolTip.visible: hovered && !pressed
                                         Controls.ToolTip.delay: 700
@@ -384,7 +246,7 @@ Item {
                                                 height: Math.abs(bandColumn.visualGain) / 24 * parent.height
                                                 radius: 3
                                                 color: Colours.palette.m3primary
-                                                opacity: root.audible ? 0.8 : 0.35
+                                                opacity: root.equalizer.audible ? 0.8 : 0.35
                                             }
                                             Rectangle {
                                                 anchors.centerIn: parent
@@ -522,7 +384,7 @@ Item {
                             property real elapsed: 0
 
                             function play() {
-                                if (!root.visible || !bandView.width || !sliders.count) return;
+                                if (!root.controlsActive || !bandView.width || !sliders.count) return;
                                 const first = sliders.itemAt(0);
                                 if (!first || !first.width) return;
                                 const step = first.width + bandRow.spacing;
@@ -559,7 +421,7 @@ Item {
                             Connections {
                                 target: root
                                 function onPresetApplied() { presetLightning.play(); }
-                                function onVisibleChanged() { if (!root.visible) presetSweep.stop(); }
+                                function onControlsActiveChanged() { if (!root.controlsActive) presetSweep.stop(); }
                             }
 
                             onPaint: {
@@ -654,34 +516,35 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         StyledText {
-                            text: qsTr("Preset: %1").arg(root.activePreset)
+                            text: qsTr("Preset: %1").arg(root.equalizer.activePreset)
                             color: Colours.palette.m3onSurface
                         }
                         Item { Layout.fillWidth: true }
                         TextButton {
                             text: qsTr("Reset to flat")
-                            disabled: !root.ready
+                            disabled: !root.equalizer.ready
                             onClicked: root.selectPreset(0)
                         }
                         TextButton {
                             text: qsTr("Reconnect")
-                            disabled: root.busy
-                            onClicked: root.refresh()
+                            disabled: root.equalizer.busy
+                            onClicked: root.equalizer.refresh()
                         }
                     }
                     Flow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: implicitHeight
-                        spacing: 6
+                        spacing: 5
                         Repeater {
-                            model: root.presetNames
+                            model: root.equalizer.presetNames
                             delegate: TextButton {
                                 required property int index
                                 required property string modelData
                                 text: modelData
                                 type: TextButton.Tonal
-                                checked: root.activePreset === modelData
-                                disabled: !root.ready
+                                checked: root.equalizer.activePreset === modelData
+                                disabled: !root.equalizer.ready
+                                horizontalPadding: Math.max(Tokens.padding.small, Tokens.padding.medium - 3)
                                 verticalPadding: 7
                                 onClicked: root.selectPreset(index)
                                 Accessible.name: qsTr("%1 preset").arg(modelData)

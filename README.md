@@ -9,7 +9,7 @@ An animated EasyEffects equalizer, right inside the Caelestia dashboard.
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-cda3c4)](LICENSE)
 [![Arch Linux / CachyOS](https://img.shields.io/badge/platform-Arch%20Linux%20%2F%20CachyOS-1793d1)](#requirements)
 
-![Bass Boost in the Caelestia Equalizer](docs/media/bass-boost.png)
+[![Expanding the equalizer and switching presets in Caelestia Media](docs/media/demo.gif)](docs/media/demo.mp4)
 
 [Install](#install) · [Watch the demo](docs/media/demo.mp4) · [Controls](#controls) · [Troubleshooting](#troubleshooting)
 
@@ -17,10 +17,10 @@ An animated EasyEffects equalizer, right inside the Caelestia dashboard.
 
 ## A little more control over your sound
 
-Change the sound of your music, games, and podcasts without leaving the top dashboard. Choose a preset, shape individual bands, or bypass the equalizer to compare.
+Open **Media → Equalizer** in the top dashboard to change the sound of your music, games, and podcasts alongside the playback controls. Choose a preset, shape individual bands, or bypass the equalizer to compare.
 
 - **Smooth motion:** animated faders, gain values, and curve transitions, with a Caelestia-themed lightning sweep on preset changes.
-- **Eleven presets:** Flat, Bass Boost, Deep Bass, Treble Boost, Vocal, Podcast, Electronic, Rock, Classical, Gaming, and Night Listening.
+- **Nine presets:** Flat, Bass Boost, Deep Bass, Treble Boost, Vocal, Electronic, Rock, Classical, and Night Listening.
 - **Comfortable controls:** drag, scroll, or use your keyboard; reset a focused band with Space.
 - **Responsive editing:** changes are grouped and queued while EasyEffects saves, keeping the controls available.
 - **Real settings:** reads and verifies values through EasyEffects’ local socket. Reopening the tab shows the current equalizer.
@@ -28,14 +28,12 @@ Change the sound of your music, games, and podcasts without leaving the top dash
 
 ## Preview
 
-![A lightning sweep connects the equalizer sliders as presets change](docs/media/demo.gif)
+The 28-second recording shows the Equalizer expanding below playback, switching presets, and toggling bypass while music plays.
 
-**[Watch the preset animation demo (MP4)](docs/media/demo.mp4)** · [Browse all previews](docs/media)
-
-The 11-second silent recording shows preset changes and the lightning sweep in the Caelestia dashboard. The GIF focuses on the equalizer controls. The curve visualizes band gains.
+**[Watch the full demo with sound (MP4)](docs/media/demo.mp4)** · [Browse all previews](docs/media)
 
 <details>
-<summary>More screenshots: Vocal and bypass</summary>
+<summary>Screenshots from the earlier standalone layout</summary>
 
 ### Vocal
 
@@ -77,11 +75,11 @@ The installer:
 3. Starts EasyEffects in the background and checks its local control socket.
 4. Keeps an existing `equalizer#0` and its settings. If it is missing, adds a **flat ten-band output equalizer** while retaining the existing effect chain, input effects, and blocklists.
 5. Enables EasyEffects at login through a user systemd service, or XDG autostart if a user systemd session is unavailable.
-6. Backs up changed files, installs the dashboard tab and a narrow wrapper change that keeps the selected Equalizer page alive while closed, and reloads Caelestia. If the reload interface is unavailable, it restarts the running shell.
+6. Backs up changed files, adds expandable Equalizer controls to Media, and reloads Caelestia. If the reload interface is unavailable, it restarts the running shell.
 
 For a system package such as one installed under `/etc/xdg`, the installer creates a user-owned copy under `$XDG_CONFIG_HOME/quickshell/caelestia` (usually `~/.config/quickshell/caelestia`). Package updates apply to the system copy. The user copy takes precedence when launching with `qs -c caelestia`. See the [Caelestia installation guide](https://github.com/caelestia-dots/shell#installation).
 
-Open the **top dashboard → Equalizer**. Fresh setups begin flat; installing does not automatically apply a bass boost. Existing bypass settings are retained.
+Open the **top dashboard → Media → Equalizer** to expand the controls below playback. Fresh setups begin flat, and existing bypass settings are retained.
 
 A flat **Caelestia Equalizer** output preset is also saved as an optional recovery preset. **Loading that preset manually replaces the output effects chain.** The installer does not load it over your existing effects.
 
@@ -125,7 +123,9 @@ git pull --ff-only
 
 Already have the repository folder? Run the update commands above from that folder.
 
-Reinstalling is safe: it avoids duplicate tabs and retains an existing equalizer’s tuning. After an upstream Caelestia update, run the installer again if the custom tab disappears.
+Upgrading from v1.0.x removes the old standalone Equalizer tab and moves the controls to **Media → Equalizer**. Run the new installer over your existing installation. It backs up the dashboard files it changes and retains your EasyEffects gains, bypass setting, and effects chain.
+
+After a Caelestia update, rerun the installer if the Equalizer section disappears from Media.
 
 ## Uninstall and backups
 
@@ -133,7 +133,7 @@ Reinstalling is safe: it avoids duplicate tabs and retains an existing equalizer
 ./install.sh --uninstall
 ```
 
-Removes the tab and its helper and restores the dashboard wrapper’s original loading policy while retaining the rest of the dashboard. It keeps EasyEffects, its audio settings, the optional preset, and startup configuration so your audio continues to work.
+Removes the expandable Equalizer controls and their helper from Media. It keeps EasyEffects, its audio settings, the optional preset, and startup configuration.
 
 Backups are stored under:
 
@@ -187,7 +187,9 @@ qmllint assets/EqualizerTab.qml  # With Caelestia/Qt QML tooling installed
 Tests cover dashboard patching, idempotency, removal, fresh audio configuration, preservation of existing settings, atomic writes, and installation in an isolated temporary home. The [GitHub Actions workflow](.github/workflows/checks.yml) runs the Python and Bash checks on pushes and pull requests without touching a real audio session.
 
 ```text
-assets/EqualizerTab.qml       Dashboard UI
+assets/EqualizerTab.qml       Shared equalizer controls
+assets/MediaEqualizer.qml     Expandable Media section
+assets/equalizer/            Equalizer state and preset logic
 assets/sound/easyeffects.py   Local socket client
 install.sh                   Installer entry point / Python bootstrap
 install.py                   Dependency, audio, startup, and dashboard setup
