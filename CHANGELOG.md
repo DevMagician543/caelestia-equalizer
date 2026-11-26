@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0
+
+- Move the equalizer into an expandable section below the playback controls in Media.
+- Migrate existing installations automatically. The installer removes the old standalone tab and its page-retention patch, backs up changed dashboard files, and preserves EasyEffects settings.
+- Share equalizer state across the controls and the collapsed header so the selected preset remains visible.
+- Replace the README preview with the new desktop recording.
+
 ## 1.0.4
 
 - Detect custom Caelestia paths from running Quickshell instances and find packaged configs in the system XDG directories.
