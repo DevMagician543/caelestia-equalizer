@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1
+
+- Recover the original EasyEffects configuration if a fresh audio setup cannot be verified.
+- Roll back partial dashboard changes on installer and uninstaller write failures.
+- Report a shell restart timeout when the old process remains running.
+- Restore the original MP4 and show the full frame in the README preview.
+
 ## 1.1.0
 
 - Move the equalizer into an expandable section below the playback controls in Media.
