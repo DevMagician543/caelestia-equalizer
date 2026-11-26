@@ -153,6 +153,51 @@ class AudioSettingsTests(unittest.TestCase):
 
 
 class AudioSetupTests(unittest.TestCase):
+    def test_backup_failure_restarts_audio_without_changing_settings(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            db = base / 'easyeffects/db'
+            db.mkdir(parents=True)
+            main = db / 'easyeffectsrc'
+            original = '[StreamOutputs]\nplugins=compressor#0\n'
+            main.write_text(original)
+            helper = Mock()
+            helper.prop.side_effect = ValueError('error_plugin_not_found')
+            with patch.object(installer, 'helper_module', return_value=helper), \
+                    patch.object(installer, 'stop_audio') as stop, \
+                    patch.object(installer, 'start_audio') as start, \
+                    patch.object(installer, 'wait_socket'), \
+                    patch.object(installer.shutil, 'copy2', side_effect=OSError('backup failed')):
+                with self.assertRaisesRegex(OSError, 'backup failed'):
+                    installer.setup_audio(base, base / 'backup')
+            start.assert_called_once_with()
+            stop.assert_called_once_with(helper)
+            self.assertEqual(main.read_text(), original)
+
+    def test_failed_final_verification_restores_audio_settings(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            db = base / 'easyeffects/db'
+            db.mkdir(parents=True)
+            main = db / 'easyeffectsrc'
+            original = '[StreamOutputs]\nplugins=compressor#0\n'
+            main.write_text(original)
+            backup = base / 'backup'
+            backup.mkdir()
+            helper = Mock()
+            helper.prop.side_effect = ValueError('error_plugin_not_found')
+            helper.snapshot.return_value = {'ready': False, 'status': 'Could not verify plugin'}
+            with patch.object(installer, 'helper_module', return_value=helper), \
+                    patch.object(installer, 'stop_audio') as stop, \
+                    patch.object(installer, 'start_audio') as start, \
+                    patch.object(installer, 'wait_socket'):
+                with self.assertRaisesRegex(RuntimeError, 'Could not verify plugin'):
+                    installer.setup_audio(base, backup)
+            self.assertEqual(stop.call_count, 2)
+            self.assertEqual(start.call_count, 2)
+            self.assertEqual(main.read_text(), original)
+            self.assertFalse((db / 'equalizerrc').exists())
+
     def test_fresh_setup_keeps_chain_and_verifies_backend(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -259,8 +304,44 @@ class ShellDiscoveryTests(unittest.TestCase):
                 installer.switch_shell(source, destination)
         run.assert_called_with('qs', '-p', str(source), '-n', '-d', check=False)
 
+    def test_reload_timeout_does_not_attempt_duplicate_start(self):
+        shell = Path('/user/caelestia')
+        with patch.object(installer, 'shell_running', return_value=True), \
+                patch.object(installer.time, 'sleep'), \
+                patch.object(installer, 'command', return_value=Mock(returncode=1)) as run:
+            with self.assertRaisesRegex(RuntimeError, 'Caelestia did not stop'):
+                installer.reload_shell(shell)
+        self.assertEqual(run.call_count, 2)
+        run.assert_called_with('qs', '-p', str(shell), 'kill')
+
 
 class InstallationTests(unittest.TestCase):
+    def test_dashboard_rollback_restores_removed_assets_and_navigation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            backup = base / 'backup'
+            backup.mkdir()
+            content = base / 'Content.qml'
+            asset = base / 'EqualizerTab.qml'
+            blocked = base / 'MediaEqualizer.qml'
+            for path in (content, asset, blocked):
+                path.write_text('original')
+                path.chmod(0o640)
+            changes = {content: ('original', 'updated'), asset: ('original', None),
+                       blocked: ('original', None)}
+            unlink = Path.unlink
+
+            def fail_one_unlink(path):
+                if path == blocked:
+                    raise PermissionError('removal blocked')
+                return unlink(path)
+
+            with patch.object(Path, 'unlink', fail_one_unlink):
+                with self.assertRaisesRegex(PermissionError, 'removal blocked'):
+                    installer.apply_dashboard_changes(changes, backup)
+            for path in (content, asset, blocked):
+                self.assertEqual(path.read_text(), 'original')
+                self.assertEqual(path.stat().st_mode & 0o777, 0o640)
     def test_install_reinstall_uninstall_in_isolated_home(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
