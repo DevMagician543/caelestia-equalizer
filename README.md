@@ -30,7 +30,7 @@ Open **Media → Equalizer** in the top dashboard to change the sound of your mu
 
 The 28-second recording shows the Equalizer expanding below playback, switching presets, and toggling bypass while music plays.
 
-**[Watch the full demo with sound (MP4)](docs/media/demo.mp4)** · [Browse all previews](docs/media)
+**[Watch the original recording with sound (MP4)](docs/media/demo.mp4)** · [Browse all previews](docs/media)
 
 <details>
 <summary>Screenshots from the earlier standalone layout</summary>
