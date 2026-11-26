@@ -27,14 +27,16 @@ def command(*args, check=True):
     return subprocess.run(args, text=True, capture_output=True, check=check, timeout=30)
 
 
-def atomic_write(path, text):
+def atomic_write(path, text, mode=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temp = tempfile.mkstemp(prefix=f'.{path.name}.', dir=path.parent)
     try:
         with os.fdopen(descriptor, 'w') as handle:
             handle.write(text)
-        if path.exists():
-            os.chmod(temp, path.stat().st_mode & 0o777)
+        if mode is None and path.exists():
+            mode = path.stat().st_mode
+        if mode is not None:
+            os.chmod(temp, mode & 0o777)
         os.replace(temp, path)
     finally:
         if os.path.exists(temp):
@@ -268,34 +270,43 @@ def setup_audio(config_home, backup_dir):
         print('Adding a flat ten-band output equalizer; keeping the existing effects chain.', flush=True)
         stop_audio(helper)
         paths = [config_home / 'easyeffects/db/easyeffectsrc', config_home / 'easyeffects/db/equalizerrc']
-        originals = [path.read_text() if path.exists() else None for path in paths]
-        for path in paths:
-            if path.exists():
-                shutil.copy2(path, backup_dir / path.name)
+        applied = []
+        start_attempted = False
         try:
+            originals = [path.read_text() if path.exists() else None for path in paths]
+            for path, original in zip(paths, originals):
+                if original is not None:
+                    shutil.copy2(path, backup_dir / path.name)
             main_text, eq_text, changed = prepare_audio_config(*(text or '' for text in originals))
             if changed:
-                atomic_write(paths[0], main_text)
-                atomic_write(paths[1], eq_text)
+                for path, original, updated in zip(paths, originals, (main_text, eq_text)):
+                    atomic_write(path, updated)
+                    applied.append((path, original))
+            start_attempted = True
             start_audio()
             wait_socket(helper)
-            if int(helper.prop('numBands')) < 1:
-                raise RuntimeError('EasyEffects did not create the equalizer.')
+            result = verify_audio(helper)
         except Exception:
             # Restore the previous audio configuration if initialization fails.
-            try:
-                stop_audio(helper)
-            except (OSError, RuntimeError, subprocess.SubprocessError):
-                pass
-            for path, original in zip(paths, originals):
-                if original is None:
-                    path.unlink(missing_ok=True)
-                else:
-                    atomic_write(path, original)
+            if applied:
+                if start_attempted:
+                    stop_audio(helper)
+                for path, original in reversed(applied):
+                    if original is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        atomic_write(path, original)
             start_audio()
             raise
     else:
         print('Keeping existing output equalizer settings.')
+        result = verify_audio(helper)
+    print('EasyEffects verified:', result['status'])
+    if result.get('globalBypass') or result.get('bypass'):
+        print('Existing bypass is enabled. Turn it off when you want to hear the equalizer.')
+
+
+def verify_audio(helper):
     result = helper.snapshot()
     if not result.get('ready') and 'not loaded' in result.get('status', ''):
         print('Restarting EasyEffects to load the newly installed LV2 plugin.', flush=True)
@@ -305,9 +316,7 @@ def setup_audio(config_home, backup_dir):
         result = helper.snapshot()
     if not result.get('ready'):
         raise RuntimeError(result.get('status', 'Could not verify the equalizer.'))
-    print('EasyEffects verified:', result['status'])
-    if result.get('globalBypass') or result.get('bypass'):
-        print('Existing bypass is enabled. Turn it off when you want to hear the equalizer.')
+    return result
 
 
 def setup_autostart(config_home, backup_dir):
@@ -407,14 +416,17 @@ def shell_running(shell_dir):
     return 'Instance ' in command('qs', '-p', str(shell_dir), 'list', check=False).stdout
 
 
-def switch_shell(source, destination):
-    command('qs', '-p', str(source), 'kill')
+def stop_shell(shell_dir):
+    command('qs', '-p', str(shell_dir), 'kill')
     for _ in range(50):
-        if not shell_running(source):
-            break
+        if not shell_running(shell_dir):
+            return
         time.sleep(0.1)
-    else:
-        raise RuntimeError('The old Caelestia instance did not stop. Restart it to use the user copy.')
+    raise RuntimeError(f'Caelestia did not stop at {shell_dir}. The configuration is saved; restart the shell manually.')
+
+
+def switch_shell(source, destination):
+    stop_shell(source)
     try:
         command('qs', '-p', str(destination), '-n', '-d')
     except subprocess.SubprocessError:
@@ -431,11 +443,7 @@ def reload_shell(shell_dir):
     if result.returncode == 0:
         print('Caelestia configuration reloaded.')
         return
-    command('qs', '-p', str(shell_dir), 'kill')
-    for _ in range(50):
-        if not shell_running(shell_dir):
-            break
-        time.sleep(0.1)
+    stop_shell(shell_dir)
     command('qs', '-p', str(shell_dir), '-n', '-d')
     print('Caelestia restarted.')
 
@@ -512,17 +520,20 @@ def main(argv=None):
 
 def install_equalizer(args, config_home, data_home, shell_dir, patches):
     dashboard = shell_dir / 'modules/dashboard'
-    target_files = [(HERE / 'assets' / path, dashboard / path) for path in DASHBOARD_ASSETS]
+    assets = {}
+    for name in DASHBOARD_ASSETS:
+        target = dashboard / name
+        original = target.read_text() if target.exists() else None
+        updated = None if args.uninstall else (HERE / 'assets' / name).read_text()
+        if original != updated:
+            assets[target] = original, updated
+    navigation = {dashboard / name: change for name, change in patches.items()}
     backup_dir = shell_dir / 'equalizer-installer-backups' / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     backup_dir.mkdir(parents=True)
     if args.uninstall:
-        for filename, (_, updated) in reversed(patches.items()):
-            shutil.copy2(dashboard / filename, backup_dir / filename)
-            atomic_write(dashboard / filename, updated)
-        for _, target in target_files:
-            if target.exists():
-                shutil.copy2(target, backup_dir / target.name)
-                target.unlink()
+        changes = dict(reversed(navigation.items()))
+        changes.update(assets)
+        apply_dashboard_changes(changes, backup_dir)
         if patches and not args.no_restart:
             reload_shell(shell_dir)
         print('Equalizer removed from the dashboard. EasyEffects, its audio settings and autostart were kept.')
@@ -539,30 +550,36 @@ def install_equalizer(args, config_home, data_home, shell_dir, patches):
     if not args.no_autostart:
         setup_autostart(config_home, backup_dir)
     install_preset(data_home)
-    changed_files = [(source, target) for source, target in target_files
-                     if not target.exists() or target.read_bytes() != source.read_bytes()]
-    if patches or changed_files:
-        originals = {}
-        try:
-            for source, target in changed_files:
-                originals[target] = target.read_text() if target.exists() else None
-                if target.exists():
-                    shutil.copy2(target, backup_dir / target.name)
-                atomic_write(target, source.read_text())
-            for filename, (original, updated) in patches.items():
-                target = dashboard / filename
-                shutil.copy2(target, backup_dir / filename)
-                originals[target] = original
-                atomic_write(target, updated)
-        except Exception:
-            for target, text in originals.items():
-                if text is None:
-                    target.unlink(missing_ok=True)
-                else:
-                    atomic_write(target, text)
-            raise
+    if assets or navigation:
+        apply_dashboard_changes({**assets, **navigation}, backup_dir)
         return backup_dir.relative_to(shell_dir)
     print('Equalizer is already up to date.')
+
+
+def apply_dashboard_changes(changes, backup_dir):
+    for target, (original, _) in changes.items():
+        current = target.read_text() if target.exists() else None
+        if current != original:
+            raise RuntimeError(f'{target} changed during installation. Retry with the current configuration.')
+        if original is not None:
+            shutil.copy2(target, backup_dir / target.name)
+
+    applied = []
+    try:
+        for target, (original, updated) in changes.items():
+            if updated is None:
+                target.unlink()
+            else:
+                atomic_write(target, updated)
+            applied.append((target, original))
+    except OSError:
+        for target, original in reversed(applied):
+            if original is None:
+                target.unlink()
+            else:
+                backup = backup_dir / target.name
+                atomic_write(target, original, backup.stat().st_mode)
+        raise
 
 
 if __name__ == '__main__':
