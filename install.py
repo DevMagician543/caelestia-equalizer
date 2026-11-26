@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the Caelestia Equalizer dashboard tab and set up native EasyEffects."""
+"""Install the equalizer in Caelestia's Media tab and set up native EasyEffects."""
 
 import argparse
 import configparser
@@ -19,6 +19,8 @@ import time
 HERE = Path(__file__).resolve().parent
 MIN_EASYEFFECTS = (8, 3, 0)
 FREQUENCIES = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+DASHBOARD_ASSETS = ('sound/easyeffects.py', 'equalizer/EqualizerState.qml', 'equalizer/qmldir',
+                    'EqualizerTab.qml', 'MediaEqualizer.qml')
 
 
 def command(*args, check=True):
@@ -64,50 +66,60 @@ def verify_easyeffects():
                            'Update your system packages and run the installer again.')
 
 
-NAV_ENTRY = '''            {
-                component: equalizerComponent,
-                iconName: "equalizer",
-                text: qsTr("Equalizer"),
-                enabled: true
-            },'''
+MEDIA_PAGE = re.compile(r'(^[ \t]*id:[ \t]*mediaComponent[ \t]*\n\s*)Media(?:Equalizer)?(?=\s*\{)', re.M)
+MEDIA_BACKGROUND = '''    BackgroundShapes {
+        anchors.fill: parent
+    }
+'''
+MEDIA_BACKGROUND_PATCH = '''    // >>> caelestia-equalizer: Media background >>>
+    property bool showMediaBackground: true
+
+    Loader {
+        anchors.fill: parent
+        active: root.showMediaBackground
+        sourceComponent: BackgroundShapes {}
+    }
+    // <<< caelestia-equalizer: Media background <<<
+'''
+
+
+def patch_media_background(original):
+    if MEDIA_BACKGROUND_PATCH in original:
+        return original
+    if original.count(MEDIA_BACKGROUND) != 1 or 'showMediaBackground' in original:
+        raise RuntimeError('Unsupported Caelestia dashboard: could not identify the Media background. '
+                           'No dashboard files were changed.')
+    return original.replace(MEDIA_BACKGROUND, MEDIA_BACKGROUND_PATCH, 1)
+
+
+def remove_media_background_patch(original):
+    return original.replace(MEDIA_BACKGROUND_PATCH, MEDIA_BACKGROUND, 1)
 
 
 def patch_navigation(original):
-    if 'component: equalizerComponent' in original:
-        if not re.search(r'id:\s*equalizerComponent\s+EqualizerTab\s*\{\s*\}', original):
-            raise RuntimeError('Existing Equalizer navigation has an unexpected structure.')
-        return original
+    updated, media_pages = MEDIA_PAGE.subn(r'\g<1>MediaEqualizer', original)
+    if media_pages != 1:
+        raise RuntimeError('Unsupported Caelestia dashboard: could not find the Media page. '
+                           'No dashboard files were changed.')
     if 'component: soundComponent' in original:
         raise RuntimeError('An earlier Sound tab is present. Migrate it before installing.')
-    media = re.compile(
-        r'(?P<block>\{\s*component:\s*mediaComponent,\s*iconName:\s*"queue_music",'
-        r'\s*text:\s*(?:Tr\.tr|qsTr)\("Media"\),\s*enabled:\s*Config\.dashboard\.showMedia\s*\},)')
-    updated, count = media.subn(lambda m: m.group('block') + '\n' + NAV_ENTRY, original, count=1)
-    if count != 1:
-        raise RuntimeError('Unsupported Caelestia dashboard: could not find the Media navigation entry. '
-                           'No dashboard files were changed.')
-    performance = re.compile(r'(?P<indent>^[ \t]*)Component\s*\{\s*id:\s*performanceComponent', re.M)
-    updated, count = performance.subn(
-        lambda m: m.group('indent') + 'Component {\n'
-        + m.group('indent') + '    id: equalizerComponent\n\n'
-        + m.group('indent') + '    EqualizerTab {}\n'
-        + m.group('indent') + '}\n\n' + m.group(0), updated, count=1)
-    if count != 1:
-        raise RuntimeError('Unsupported Caelestia dashboard: could not find page components. '
-                           'No dashboard files were changed.')
-    return updated
+    return remove_standalone_tab(updated)
 
 
 def remove_navigation(original):
-    if 'component: equalizerComponent' not in original:
-        return original
+    return remove_standalone_tab(MEDIA_PAGE.sub(r'\g<1>Media', original, count=1))
+
+
+def remove_standalone_tab(original):
+    uses = len(re.findall(r'\bcomponent:\s*equalizerComponent\b', original))
+    definitions = len(re.findall(r'\bid:\s*equalizerComponent\b', original))
     entry = re.compile(r'^[ \t]*\{\s*component:\s*equalizerComponent,\s*iconName:\s*"equalizer",'
                        r'\s*text:\s*qsTr\("Equalizer"\),\s*enabled:\s*true\s*\},\n?', re.M)
-    updated, entries = entry.subn('', original, count=1)
+    updated, entries = entry.subn('', original)
     component = re.compile(r'^[ \t]*Component\s*\{\s*id:\s*equalizerComponent\s*'
-                           r'EqualizerTab\s*\{\s*\}\s*\}\n?', re.M)
-    updated, components = component.subn('', updated, count=1)
-    if entries != 1 or components != 1:
+                           r'EqualizerTab\s*\{\s*\}\s*\}\n{0,2}', re.M)
+    updated, components = component.subn('', updated)
+    if entries != uses or components != definitions or uses > 1 or definitions > 1:
         raise RuntimeError('Equalizer navigation was customized; refusing to remove unrelated code.')
     return updated
 
@@ -132,21 +144,9 @@ WRAPPER_CACHE_BLOCK = """    // >>> caelestia-equalizer: selected page cache >>>
 """
 
 
-def patch_wrapper(original):
-    """Retain the selected page without binding Loader.active to its own item."""
-    if WRAPPER_CACHED in original and WRAPPER_CACHE_BLOCK in original and WRAPPER_LOAD_HANDLER in original:
-        return original
-    pattern = re.compile(r'(^[ \t]*active:\s*)root\.shouldBeActive\s*\|\|\s*root\.visible[ \t]*$', re.M)
-    updated, count = pattern.subn(lambda match: match.group(1) + WRAPPER_CACHED, original)
-    if (count != 1 or '    readonly property real nonAnimHeight:' not in original or
-            '        id: content\n' not in original or re.search(r'\bonLoaded\s*:', original)):
-        raise RuntimeError('Unsupported Caelestia dashboard wrapper: could not find its loading policy. '
-                           'No dashboard files were changed.')
-    updated = updated.replace('    readonly property real nonAnimHeight:', WRAPPER_CACHE_BLOCK + '\n    readonly property real nonAnimHeight:', 1)
-    return updated.replace('        id: content\n', '        id: content\n' + WRAPPER_LOAD_HANDLER, 1)
-
-
 def remove_wrapper_patch(original):
+    if WRAPPER_CACHE_BLOCK not in original:
+        return original
     return (original.replace(WRAPPER_CACHE_BLOCK + '\n', '')
             .replace(WRAPPER_LOAD_HANDLER, '')
             .replace(WRAPPER_CACHED, WRAPPER_ACTIVE))
@@ -446,7 +446,7 @@ def main(argv=None):
     parser.add_argument('--no-restart', action='store_true', help='Do not reload/restart the Caelestia shell')
     parser.add_argument('--no-audio-setup', action='store_true', help='Do not start or configure EasyEffects')
     parser.add_argument('--no-autostart', action='store_true', help='Do not enable EasyEffects at login')
-    parser.add_argument('--uninstall', action='store_true', help='Remove the dashboard tab; keep audio settings and packages')
+    parser.add_argument('--uninstall', action='store_true', help='Remove the Media equalizer; keep audio settings and packages')
     parser.add_argument('--shell-dir', type=Path, help='Path to the existing Caelestia Quickshell configuration')
     args = parser.parse_args(argv)
     if os.geteuid() == 0:
@@ -456,14 +456,22 @@ def main(argv=None):
     data_home = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
     override = args.shell_dir if args.shell_dir is not None else os.environ.get('CAELESTIA_DIR') or None
     source, shell_dir = find_shell(config_home, override, args.uninstall)
-    content = source / 'modules/dashboard/Content.qml'
-    wrapper = content.with_name('Wrapper.qml')
-    if not wrapper.is_file():
-        raise RuntimeError('Caelestia dashboard wrapper was not found at ' + str(wrapper))
-    original_wrapper = wrapper.read_text()
-    updated_wrapper = remove_wrapper_patch(original_wrapper) if args.uninstall else patch_wrapper(original_wrapper)
-    original = content.read_text()
-    updated = remove_navigation(original) if args.uninstall else patch_navigation(original)
+    dashboard = source / 'modules/dashboard'
+    patches = {}
+    for filename, install, uninstall in (
+        ('Media.qml', patch_media_background, remove_media_background_patch),
+        ('Wrapper.qml', remove_wrapper_patch, remove_wrapper_patch),
+        ('Content.qml', patch_navigation, remove_navigation),
+    ):
+        path = dashboard / filename
+        if not path.is_file():
+            if filename == 'Wrapper.qml' or (args.uninstall and filename == 'Media.qml'):
+                continue
+            raise RuntimeError('Caelestia dashboard file was not found at ' + str(path))
+        original = path.read_text()
+        updated = (uninstall if args.uninstall else install)(original)
+        if updated != original:
+            patches[filename] = (original, updated)
     with ExitStack() as cleanup:
         install_dir = shell_dir
         if source != shell_dir:
@@ -475,8 +483,7 @@ def main(argv=None):
             for directory, _, _ in os.walk(install_dir):
                 path = Path(directory)
                 path.chmod(path.stat().st_mode | 0o700)
-        backup = install_equalizer(args, config_home, data_home, install_dir, original, updated,
-                          original_wrapper, updated_wrapper)
+        backup = install_equalizer(args, config_home, data_home, install_dir, patches)
         if source != shell_dir:
             if shell_dir.exists() or shell_dir.is_symlink():
                 raise RuntimeError(f'{shell_dir} appeared during installation. Existing config kept.')
@@ -484,7 +491,10 @@ def main(argv=None):
             print(f'Installed a user copy of Caelestia at {shell_dir}.')
     if not args.uninstall:
         if backup is not None:
-            print('Installed Equalizer tab. Backups:', shell_dir / backup)
+            print('Installed Equalizer. Backups:', shell_dir / backup)
+        original_content, _ = patches.get('Content.qml', ('', ''))
+        if re.search(r'\bcomponent:\s*equalizerComponent\b', original_content):
+            print('Moved the existing Equalizer tab into Media. EasyEffects settings were kept.')
         if not args.no_restart:
             if source != shell_dir and shell_running(source):
                 switch_shell(source, shell_dir)
@@ -497,28 +507,25 @@ def main(argv=None):
                     reload_shell(shell_dir)
             else:
                 reload_shell(shell_dir)
-        print('Ready. Open the top dashboard and select Equalizer.')
+        print('Ready. Open the Media tab and expand Equalizer.')
 
 
-def install_equalizer(args, config_home, data_home, shell_dir, original, updated,
-                      original_wrapper, updated_wrapper):
-    content = shell_dir / 'modules/dashboard/Content.qml'
-    wrapper = content.with_name('Wrapper.qml')
+def install_equalizer(args, config_home, data_home, shell_dir, patches):
+    dashboard = shell_dir / 'modules/dashboard'
+    target_files = [(HERE / 'assets' / path, dashboard / path) for path in DASHBOARD_ASSETS]
     backup_dir = shell_dir / 'equalizer-installer-backups' / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     backup_dir.mkdir(parents=True)
     if args.uninstall:
-        shutil.copy2(content, backup_dir / 'Content.qml')
-        atomic_write(content, updated)
-        if updated_wrapper != original_wrapper:
-            shutil.copy2(wrapper, backup_dir / 'Wrapper.qml')
-            atomic_write(wrapper, updated_wrapper)
-        for target in (content.parent / 'EqualizerTab.qml', content.parent / 'sound/easyeffects.py'):
+        for filename, (_, updated) in reversed(patches.items()):
+            shutil.copy2(dashboard / filename, backup_dir / filename)
+            atomic_write(dashboard / filename, updated)
+        for _, target in target_files:
             if target.exists():
                 shutil.copy2(target, backup_dir / target.name)
                 target.unlink()
-        if (updated != original or updated_wrapper != original_wrapper) and not args.no_restart:
+        if patches and not args.no_restart:
             reload_shell(shell_dir)
-        print('Equalizer tab removed. EasyEffects, its audio settings and autostart were kept.')
+        print('Equalizer removed from the dashboard. EasyEffects, its audio settings and autostart were kept.')
         return
     if args.no_packages:
         verify_easyeffects()
@@ -532,21 +539,21 @@ def install_equalizer(args, config_home, data_home, shell_dir, original, updated
     if not args.no_autostart:
         setup_autostart(config_home, backup_dir)
     install_preset(data_home)
-    target_files = [(HERE / 'assets/EqualizerTab.qml', content.parent / 'EqualizerTab.qml'),
-                    (HERE / 'assets/sound/easyeffects.py', content.parent / 'sound/easyeffects.py')]
-    changed = updated != original or updated_wrapper != original_wrapper or any(not target.exists() or target.read_bytes() != source.read_bytes() for source, target in target_files)
-    if changed:
-        shutil.copy2(content, backup_dir / 'Content.qml')
-        shutil.copy2(wrapper, backup_dir / 'Wrapper.qml')
-        originals = {content: original, wrapper: original_wrapper}
+    changed_files = [(source, target) for source, target in target_files
+                     if not target.exists() or target.read_bytes() != source.read_bytes()]
+    if patches or changed_files:
+        originals = {}
         try:
-            for source, target in target_files:
+            for source, target in changed_files:
                 originals[target] = target.read_text() if target.exists() else None
                 if target.exists():
                     shutil.copy2(target, backup_dir / target.name)
                 atomic_write(target, source.read_text())
-            atomic_write(wrapper, updated_wrapper)
-            atomic_write(content, updated)
+            for filename, (original, updated) in patches.items():
+                target = dashboard / filename
+                shutil.copy2(target, backup_dir / filename)
+                originals[target] = original
+                atomic_write(target, updated)
         except Exception:
             for target, text in originals.items():
                 if text is None:
@@ -555,7 +562,7 @@ def install_equalizer(args, config_home, data_home, shell_dir, original, updated
                     atomic_write(target, text)
             raise
         return backup_dir.relative_to(shell_dir)
-    print('Equalizer tab is already up to date.')
+    print('Equalizer is already up to date.')
 
 
 if __name__ == '__main__':
